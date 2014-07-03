@@ -30,6 +30,9 @@ go test -v ./server/v2/tests -race
 go test -i ./pkg/btrfs
 go test -v ./pkg/btrfs
 
+go test -i ./raft
+go test -v ./raft
+
 go test -i ./tests/functional
 ETCD_BIN_PATH=$(pwd)/bin/etcd go test -v ./tests/functional -race
 
