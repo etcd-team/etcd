@@ -104,7 +104,7 @@ func TestStartCluster(t *testing.T) {
 	if n.sm.id != 0 {
 		t.Errorf("id = %d, want 0", n.sm.id)
 	}
-	if n.sm.state != stateLeader {
+	if n.sm.state() != stateLeader {
 		t.Errorf("state = %s, want %s", n.sm.state, stateLeader)
 	}
 }

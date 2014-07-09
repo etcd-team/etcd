@@ -6,10 +6,27 @@ import (
 	"testing"
 )
 
+const (
+	stateFollower  = "follower"
+	stateCandidate = "candidate"
+	stateLeader    = "leader"
+)
+
+func (sm *stateMachine) state() string {
+	switch {
+	case sm.IsLeader():
+		return "leader"
+	case sm.IsCandidate():
+		return "candidate"
+	default:
+		return "follower"
+	}
+}
+
 func TestLeaderElection(t *testing.T) {
 	tests := []struct {
 		*network
-		state stateType
+		state string
 	}{
 		{newNetwork(nil, nil, nil), stateLeader},
 		{newNetwork(nil, nil, nopStepper), stateLeader},
@@ -27,7 +44,7 @@ func TestLeaderElection(t *testing.T) {
 	for i, tt := range tests {
 		tt.send(Message{To: 0, Type: msgHup})
 		sm := tt.network.peers[0].(*stateMachine)
-		if sm.state != tt.state {
+		if sm.state() != tt.state {
 			t.Errorf("#%d: state = %s, want %s", i, sm.state, tt.state)
 		}
 		if g := sm.term; g != 1 {
@@ -210,7 +227,7 @@ func TestDuelingCandidates(t *testing.T) {
 	wlog := &log{ents: []Entry{{}, Entry{Type: Normal, Data: nil, Term: 1}}, committed: 1}
 	tests := []struct {
 		sm    *stateMachine
-		state stateType
+		state string
 		term  int
 		log   *log
 	}{
@@ -220,7 +237,7 @@ func TestDuelingCandidates(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		if g := tt.sm.state; g != tt.state {
+		if g := tt.sm.state(); g != tt.state {
 			t.Errorf("#%d: state = %s, want %s", i, g, tt.state)
 		}
 		if g := tt.sm.term; g != tt.term {
@@ -253,7 +270,7 @@ func TestCandidateConcede(t *testing.T) {
 	tt.send(Message{To: 2, Type: msgProp, Entries: []Entry{{Data: data}}})
 
 	a := tt.peers[0].(*stateMachine)
-	if g := a.state; g != stateFollower {
+	if g := a.state(); g != stateFollower {
 		t.Errorf("state = %s, want %s", g, stateFollower)
 	}
 	if g := a.term; g != 1 {
@@ -277,7 +294,7 @@ func TestSingleNodeCandidate(t *testing.T) {
 	tt.send(Message{To: 0, Type: msgHup})
 
 	sm := tt.peers[0].(*stateMachine)
-	if sm.state != stateLeader {
+	if sm.state() != stateLeader {
 		t.Errorf("state = %d, want %d", sm.state, stateLeader)
 	}
 }
@@ -444,43 +461,44 @@ func TestCommit(t *testing.T) {
 
 func TestRecvMsgVote(t *testing.T) {
 	tests := []struct {
-		state   stateType
+		state   string
 		i, term int
 		voteFor int
+		lead    int
 		w       int
 	}{
-		{stateFollower, 0, 0, none, -1},
-		{stateFollower, 0, 1, none, -1},
-		{stateFollower, 0, 2, none, -1},
-		{stateFollower, 0, 3, none, 2},
+		{stateFollower, 0, 0, none, none, -1},
+		{stateFollower, 0, 1, none, none, -1},
+		{stateFollower, 0, 2, none, none, -1},
+		{stateFollower, 0, 3, none, none, 2},
 
-		{stateFollower, 1, 0, none, -1},
-		{stateFollower, 1, 1, none, -1},
-		{stateFollower, 1, 2, none, -1},
-		{stateFollower, 1, 3, none, 2},
+		{stateFollower, 1, 0, none, none, -1},
+		{stateFollower, 1, 1, none, none, -1},
+		{stateFollower, 1, 2, none, none, -1},
+		{stateFollower, 1, 3, none, none, 2},
 
-		{stateFollower, 2, 0, none, -1},
-		{stateFollower, 2, 1, none, -1},
-		{stateFollower, 2, 2, none, 2},
-		{stateFollower, 2, 3, none, 2},
+		{stateFollower, 2, 0, none, none, -1},
+		{stateFollower, 2, 1, none, none, -1},
+		{stateFollower, 2, 2, none, none, 2},
+		{stateFollower, 2, 3, none, none, 2},
 
-		{stateFollower, 3, 0, none, -1},
-		{stateFollower, 3, 1, none, -1},
-		{stateFollower, 3, 2, none, 2},
-		{stateFollower, 3, 3, none, 2},
+		{stateFollower, 3, 0, none, none, -1},
+		{stateFollower, 3, 1, none, none, -1},
+		{stateFollower, 3, 2, none, none, 2},
+		{stateFollower, 3, 3, none, none, 2},
 
-		{stateFollower, 3, 2, 1, 2},
-		{stateFollower, 3, 2, 0, -1},
+		{stateFollower, 3, 2, 1, none, 2},
+		{stateFollower, 3, 2, 0, none, -1},
 
-		{stateLeader, 3, 3, 0, -1},
-		{stateCandidate, 3, 3, 0, -1},
+		{stateLeader, 3, 3, 0, 0, -1},
+		{stateCandidate, 3, 3, 0, none, -1},
 	}
 
 	for i, tt := range tests {
 		sm := &stateMachine{
-			state: tt.state,
-			vote:  tt.voteFor,
-			log:   &log{ents: []Entry{{}, {Term: 2}, {Term: 2}}},
+			lead: tt.lead,
+			vote: tt.voteFor,
+			log:  &log{ents: []Entry{{}, {Term: 2}, {Term: 2}}},
 		}
 
 		sm.Step(Message{Type: msgVote, From: 1, Index: tt.i, LogTerm: tt.term})
@@ -493,59 +511,6 @@ func TestRecvMsgVote(t *testing.T) {
 		if g := msgs[0].Index; g != tt.w {
 			t.Errorf("#%d, m.Index = %d, want %d", i, g, tt.w)
 		}
-	}
-}
-
-func TestStateTransition(t *testing.T) {
-	tests := []struct {
-		from   stateType
-		to     stateType
-		wallow bool
-		wterm  int
-		wlead  int
-	}{
-		{stateFollower, stateFollower, true, 1, none},
-		{stateFollower, stateCandidate, true, 1, none},
-		{stateFollower, stateLeader, false, -1, none},
-
-		{stateCandidate, stateFollower, true, 0, none},
-		{stateCandidate, stateCandidate, true, 1, none},
-		{stateCandidate, stateLeader, true, 0, 0},
-
-		{stateLeader, stateFollower, true, 1, none},
-		{stateLeader, stateCandidate, false, 1, none},
-		{stateLeader, stateLeader, true, 0, 0},
-	}
-
-	for i, tt := range tests {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					if tt.wallow == true {
-						t.Errorf("%d: allow = %v, want %v", i, false, true)
-					}
-				}
-			}()
-
-			sm := newStateMachine(0, []int{0})
-			sm.state = tt.from
-
-			switch tt.to {
-			case stateFollower:
-				sm.becomeFollower(tt.wterm, tt.wlead)
-			case stateCandidate:
-				sm.becomeCandidate()
-			case stateLeader:
-				sm.becomeLeader()
-			}
-
-			if sm.term != tt.wterm {
-				t.Errorf("%d: term = %d, want %d", i, sm.term, tt.wterm)
-			}
-			if sm.lead != tt.wlead {
-				t.Errorf("%d: lead = %d, want %d", i, sm.lead, tt.wlead)
-			}
-		}()
 	}
 }
 
@@ -598,20 +563,19 @@ func TestConfChangeLeader(t *testing.T) {
 }
 
 func TestAllServerStepdown(t *testing.T) {
-	tests := []struct {
-		state stateType
+	const tterm = 3
 
-		wstate stateType
+	tests := []struct {
+		state string
+
+		wstate string
 		wterm  int
 		windex int
 	}{
-		{stateFollower, stateFollower, 3, 1},
-		{stateCandidate, stateFollower, 3, 1},
-		{stateLeader, stateFollower, 3, 2},
+		{stateFollower, stateFollower, tterm, 1},
+		{stateCandidate, stateFollower, tterm, 1},
+		{stateLeader, stateFollower, tterm, 2},
 	}
-
-	tmsgTypes := [...]messageType{msgVote, msgApp}
-	tterm := 3
 
 	for i, tt := range tests {
 		sm := newStateMachine(0, []int{0, 1, 2})
@@ -625,17 +589,17 @@ func TestAllServerStepdown(t *testing.T) {
 			sm.becomeLeader()
 		}
 
-		for j, msgType := range tmsgTypes {
-			sm.Step(Message{Type: msgType, Term: tterm, LogTerm: tterm})
+		for j, msgType := range []messageType{msgVote, msgApp} {
+			sm.Step(Message{From: 1, Type: msgType, Term: tterm, LogTerm: tterm})
 
-			if sm.state != tt.wstate {
-				t.Errorf("#%d.%d state = %v , want %v", i, j, sm.state, tt.wstate)
+			if sm.state() != tt.wstate {
+				t.Errorf("#%d.%d state = %v, want %v", i, j, sm.state(), tt.wstate)
 			}
 			if sm.term != tt.wterm {
-				t.Errorf("#%d.%d term = %v , want %v", i, j, sm.term, tt.wterm)
+				t.Errorf("#%d.%d term = %v, want %v", i, j, sm.term, tt.wterm)
 			}
 			if len(sm.log.ents) != tt.windex {
-				t.Errorf("#%d.%d index = %v , want %v", i, j, len(sm.log.ents), tt.windex)
+				t.Errorf("#%d.%d index = %v, want %v", i, j, len(sm.log.ents), tt.windex)
 			}
 		}
 	}
@@ -680,20 +644,20 @@ func TestLeaderAppResp(t *testing.T) {
 // tests the output of the statemachine when receiving msgBeat
 func TestRecvMsgBeat(t *testing.T) {
 	tests := []struct {
-		state stateType
-		wMsg  int
+		vote int
+		lead int
+		wMsg int
 	}{
-		{stateLeader, 2},
+		{0, 0, 2},
 		// candidate and follower should ignore msgBeat
-		{stateCandidate, 0},
-		{stateFollower, 0},
+		{0, none, 0},
+		{none, none, 0},
 	}
 
 	for i, tt := range tests {
 		sm := newStateMachine(0, []int{0, 1, 2})
 		sm.log = &log{ents: []Entry{{}, {Term: 0}, {Term: 1}}}
 		sm.term = 1
-		sm.state = tt.state
 		sm.Step(Message{Type: msgBeat})
 
 		msgs := sm.Msgs()

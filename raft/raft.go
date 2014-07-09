@@ -35,30 +35,6 @@ func (mt messageType) String() string {
 
 var errNoLeader = errors.New("no leader")
 
-const (
-	stateFollower stateType = iota
-	stateCandidate
-	stateLeader
-)
-
-type stateType int
-
-var stmap = [...]string{
-	stateFollower:  "stateFollower",
-	stateCandidate: "stateCandidate",
-	stateLeader:    "stateLeader",
-}
-
-var stepmap = [...]stepFunc{
-	stateFollower:  stepFollower,
-	stateCandidate: stepCandidate,
-	stateLeader:    stepLeader,
-}
-
-func (st stateType) String() string {
-	return stmap[int(st)]
-}
-
 type Message struct {
 	Type     messageType
 	To       int
@@ -100,8 +76,6 @@ type stateMachine struct {
 
 	ins map[int]*index
 
-	state stateType
-
 	votes map[int]bool
 
 	msgs []Message
@@ -120,6 +94,14 @@ func newStateMachine(id int, peers []int) *stateMachine {
 	}
 	sm.reset(0)
 	return sm
+}
+
+func (s *stateMachine) IsLeader() bool {
+	return s.lead == s.id
+}
+
+func (s *stateMachine) IsCandidate() bool {
+	return s.vote == s.id && !s.IsLeader()
 }
 
 func (sm *stateMachine) poll(id int, v bool) (granted int) {
@@ -215,28 +197,17 @@ func (sm *stateMachine) promotable() bool {
 func (sm *stateMachine) becomeFollower(term, lead int) {
 	sm.reset(term)
 	sm.lead = lead
-	sm.state = stateFollower
 	sm.pendingConf = false
 }
 
 func (sm *stateMachine) becomeCandidate() {
-	// TODO(xiangli) remove the panic when the raft implementation is stable
-	if sm.state == stateLeader {
-		panic("invalid transition [leader -> candidate]")
-	}
 	sm.reset(sm.term + 1)
 	sm.vote = sm.id
-	sm.state = stateCandidate
 }
 
 func (sm *stateMachine) becomeLeader() {
-	// TODO(xiangli) remove the panic when the raft implementation is stable
-	if sm.state == stateFollower {
-		panic("invalid transition [follower -> leader]")
-	}
 	sm.reset(sm.term)
 	sm.lead = sm.id
-	sm.state = stateLeader
 
 	for _, e := range sm.log.ents[sm.log.committed:] {
 		if e.isConfig() {
@@ -281,7 +252,14 @@ func (sm *stateMachine) Step(m Message) (ok bool) {
 		return true
 	}
 
-	return stepmap[sm.state](sm, m)
+	switch {
+	case sm.IsLeader():
+		return stepLeader(sm, m)
+	case sm.IsCandidate():
+		return stepCandidate(sm, m)
+	default:
+		return stepFollower(sm, m)
+	}
 }
 
 func (sm *stateMachine) handleAppendEntries(m Message) {

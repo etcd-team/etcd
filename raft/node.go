@@ -114,7 +114,7 @@ func (n *Node) Tick() {
 	}
 
 	timeout, msgType := n.election, msgHup
-	if n.sm.state == stateLeader {
+	if n.sm.IsLeader() {
 		timeout, msgType = n.heartbeat, msgBeat
 	}
 	if n.elapsed >= timeout {
