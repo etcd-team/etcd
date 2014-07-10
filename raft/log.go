@@ -46,14 +46,21 @@ func newLog() *log {
 func (l *log) maybeAppend(index, logTerm, committed int, ents ...Entry) bool {
 	if l.matchTerm(index, logTerm) {
 		l.append(index, ents...)
-		l.committed = committed
+		if committed > l.committed {
+			l.committed = committed
+		}
 		return true
 	}
 	return false
 }
 
 func (l *log) append(after int, ents ...Entry) int {
-	l.ents = append(l.slice(l.offset, after+1), ents...)
+	for i, ne := range ents {
+		if oe := l.at(after + 1 + i); oe == nil || oe.Term != ne.Term {
+			l.ents = append(l.slice(l.offset, after+1+i), ents[i:]...)
+			break
+		}
+	}
 	return l.lastIndex()
 }
 
