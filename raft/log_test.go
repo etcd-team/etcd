@@ -113,6 +113,35 @@ func TestLogRestore(t *testing.T) {
 	}
 }
 
+func TestAppend(t *testing.T) {
+	logents := []Entry{{Term: 1}, {Term: 2}}
+	tests := []struct {
+		after int
+		ents  []Entry
+
+		windex   int
+		wlogents []Entry
+	}{
+		{2, []Entry{}, 2, []Entry{{Term: 1}, {Term: 2}}},
+		{2, []Entry{{Term: 2}}, 3, []Entry{{Term: 1}, {Term: 2}, {Term: 2}}},
+		{0, []Entry{{Term: 2}}, 1, []Entry{{Term: 2}}},
+		{0, []Entry{{Term: 2}, {Term: 3}}, 2, []Entry{{Term: 2}, {Term: 3}}},
+		{1, []Entry{{Term: 3}, {Term: 3}}, 3, []Entry{{Term: 1}, {Term: 3}, {Term: 3}}},
+	}
+
+	for i, tt := range tests {
+		log := newLog()
+		log.ents = append(log.ents, logents...)
+		index := log.append(tt.after, tt.ents...)
+		if index != tt.windex {
+			t.Errorf("#%d: lastIndex = %d, want %d", i, index, tt.windex)
+		}
+		if g := log.entries(1); !reflect.DeepEqual(g, tt.wlogents) {
+			t.Errorf("#%d: logEnts = %+v, want %+v", i, g, tt.wlogents)
+		}
+	}
+}
+
 func TestIsOutOfBounds(t *testing.T) {
 	offset := 100
 	num := 100
