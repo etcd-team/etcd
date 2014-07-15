@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"path"
 	"time"
 
@@ -44,6 +45,7 @@ const (
 )
 
 type Server struct {
+	// config.Cluster is used iff in standby mode
 	config *config.Config
 
 	mode int
@@ -51,8 +53,11 @@ type Server struct {
 	id           int64
 	pubAddr      string
 	raftPubAddr  string
-	nodes        map[string]bool
 	tickDuration time.Duration
+
+	// leader is valid iff in standby mode
+	leader string
+	nodes  map[string]bool
 
 	proposal    chan v2Proposal
 	node        *v2Raft
@@ -63,9 +68,11 @@ type Server struct {
 
 	store.Store
 
-	stop chan struct{}
+	modeC chan int
+	stop  chan struct{}
 
-	http.Handler
+	participantHandler http.Handler
+	standbyHandler     http.Handler
 }
 
 func New(c *config.Config, id int64) *Server {
@@ -103,7 +110,8 @@ func New(c *config.Config, id int64) *Server {
 
 		Store: store.New(),
 
-		stop: make(chan struct{}),
+		modeC: make(chan int, 10),
+		stop:  make(chan struct{}),
 	}
 
 	for _, seed := range c.Peers {
@@ -118,7 +126,10 @@ func New(c *config.Config, id int64) *Server {
 	m.Handle(v2StoreStatsPrefix, handlerErr(s.serveStoreStats))
 	m.Handle(v2adminConfigPrefix, handlerErr(s.serveAdminConfig))
 	m.Handle(v2adminMachinesPrefix, handlerErr(s.serveAdminMachines))
-	s.Handler = m
+	s.participantHandler = m
+	m = http.NewServeMux()
+	m.Handle("/", handlerErr(s.serveRedirect))
+	s.standbyHandler = m
 	return s
 }
 
@@ -127,7 +138,7 @@ func (s *Server) SetTick(d time.Duration) {
 }
 
 func (s *Server) RaftHandler() http.Handler {
-	return s.t
+	return http.HandlerFunc(s.ServeHTTPRaft)
 }
 
 func (s *Server) ClusterConfig() *config.ClusterConfig {
@@ -202,8 +213,8 @@ func (s *Server) Add(id int64, raftPubAddr string, pubAddr string) error {
 		return err
 	}
 	for {
-		if s.mode == stop {
-			return fmt.Errorf("server is stopped")
+		if s.mode != participant {
+			return fmt.Errorf("server is not in participant")
 		}
 		s.addNodeC <- raft.Config{NodeId: id, Addr: raftPubAddr, Context: []byte(pubAddr)}
 		w, err := s.Watch(p, true, false, index+1)
@@ -229,8 +240,8 @@ func (s *Server) Remove(id int64) error {
 		return err
 	}
 	for {
-		if s.mode == stop {
-			return fmt.Errorf("server is stopped")
+		if s.mode != participant {
+			return fmt.Errorf("server is not in participant")
 		}
 		s.removeNodeC <- raft.Config{NodeId: id}
 		w, err := s.Watch(p, true, false, index+1)
@@ -248,8 +259,34 @@ func (s *Server) Remove(id int64) error {
 	}
 }
 
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch s.mode {
+	case participant:
+		s.participantHandler.ServeHTTP(w, r)
+	case standby:
+		s.standbyHandler.ServeHTTP(w, r)
+	case stop:
+		http.Error(w, "server is stopped", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) ServeHTTPRaft(w http.ResponseWriter, r *http.Request) {
+	switch s.mode {
+	case participant:
+		s.t.ServeHTTP(w, r)
+	case standby:
+		http.NotFound(w, r)
+	case stop:
+		http.Error(w, "server is stopped", http.StatusInternalServerError)
+	}
+}
 func (s *Server) run() {
 	for {
+		select {
+		case s.modeC <- s.mode:
+		default:
+		}
+
 		switch s.mode {
 		case participant:
 			s.runParticipant()
@@ -270,6 +307,8 @@ func (s *Server) runParticipant() {
 	recv := s.t.recv
 	ticker := time.NewTicker(s.tickDuration)
 	v2SyncTicker := time.NewTicker(time.Millisecond * 500)
+
+	defer node.CancelAll()
 
 	var proposal chan v2Proposal
 	for {
@@ -299,20 +338,81 @@ func (s *Server) runParticipant() {
 		s.apply(node.Next())
 		s.send(node.Msgs())
 		if node.IsRemoved() {
-			// TODO: delete it after standby is implemented
-			s.mode = stop
-			log.Printf("Node: %d removed from participants\n", s.id)
-			return
+			break
 		}
 	}
+
+	log.Printf("Node: %d removed to standby mode\n", s.id)
+	if s.node.HasLeader() && !s.node.IsLeader() {
+		p := path.Join(v2machineKVPrefix, fmt.Sprint(s.node.Leader()))
+		if ev, err := s.Get(p, false, false); err == nil {
+			if m, err := url.ParseQuery(*ev.Node.Value); err == nil {
+				s.leader = m["raft"][0]
+			}
+		}
+	}
+	config := s.ClusterConfig()
+	s.config.Cluster.ActiveSize = config.ActiveSize
+	s.config.Cluster.RemoveDelay = config.RemoveDelay
+	s.config.Cluster.SyncInterval = config.SyncInterval
+	s.mode = standby
+	return
 }
 
 func (s *Server) runStandby() {
-	panic("unimplemented")
+	syncDuration := time.Duration(int64(s.config.Cluster.SyncInterval * float64(time.Second)))
+	joinCluster := func() error {
+		if s.config.Cluster.ActiveSize <= len(s.nodes) {
+			return fmt.Errorf("full cluster")
+		}
+		info := &context{
+			MinVersion: store.MinVersion(),
+			MaxVersion: store.MaxVersion(),
+			ClientURL:  s.pubAddr,
+			PeerURL:    s.raftPubAddr,
+		}
+		if err := s.client.AddMachine(s.leader, fmt.Sprint(s.id), info); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	for {
+		select {
+		case <-time.After(syncDuration):
+		case <-s.stop:
+			log.Printf("Node: %d stopped\n", s.id)
+			s.mode = stop
+			return
+		}
+
+		if err := s.syncCluster(); err != nil {
+			continue
+		}
+		if err := joinCluster(); err != nil {
+			continue
+		}
+		break
+	}
+
+	log.Printf("Node: %d removed to participant mode\n", s.id)
+	// TODO(yichengq): use old v2Raft
+	// 1. reject proposal in leader state when sm is removed
+	// 2. record removeIndex in node to ignore msgDenial and old removal
+	s.Store = store.New()
+	s.node = &v2Raft{
+		Node:   raft.New(s.id, defaultHeartbeat, defaultElection),
+		result: make(map[wait]chan interface{}),
+	}
+	s.mode = participant
+	return
 }
 
 func (s *Server) apply(ents []raft.Entry) {
 	offset := s.node.Applied() - int64(len(ents)) + 1
+	if len(ents) > 0 {
+		println("node", s.id, "apply", len(ents), "to", s.node.Applied())
+	}
 	for i, ent := range ents {
 		switch ent.Type {
 		// expose raft entry type
@@ -344,9 +444,12 @@ func (s *Server) apply(ents []raft.Entry) {
 			}
 			log.Printf("Remove Node %x\n", cfg.NodeId)
 			p := path.Join(v2machineKVPrefix, fmt.Sprint(cfg.NodeId))
-			if _, err := s.Store.Delete(p, false, false); err == nil {
-				delete(s.nodes, cfg.Addr)
+			if ev, err := s.Get(p, false, false); err == nil {
+				if m, err := url.ParseQuery(*ev.Node.Value); err == nil {
+					delete(s.nodes, m["raft"][0])
+				}
 			}
+			s.Store.Delete(p, false, false)
 		default:
 			panic("unimplemented")
 		}
@@ -378,6 +481,17 @@ func (s *Server) send(msgs []raft.Message) {
 			}
 		}(i)
 	}
+}
+
+func (s *Server) setClusterConfig(c *config.ClusterConfig) error {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	if _, err := s.Set(v2configKVPrefix, false, string(b), store.Permanent); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) fetchAddr(nodeId int64) error {

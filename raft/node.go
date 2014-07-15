@@ -83,6 +83,7 @@ func (n *Node) Msgs() []Message { return n.sm.Msgs() }
 
 func (n *Node) Step(m Message) bool {
 	if m.Type == msgDenied {
+		println("denial removal")
 		n.removed = true
 		return false
 	}
@@ -126,6 +127,9 @@ func (n *Node) Next() []Entry {
 			}
 			n.sm.addNode(c.NodeId)
 			delete(n.rmNodes, c.NodeId)
+			if c.NodeId == n.sm.id {
+				n.removed = false
+			}
 		case RemoveNode:
 			c := new(Config)
 			if err := json.Unmarshal(ents[i].Data, c); err != nil {
