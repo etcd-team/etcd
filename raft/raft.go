@@ -3,11 +3,12 @@ package raft
 import (
 	"errors"
 	"sort"
+	"sync/atomic"
 )
 
 const none = -1
 
-type messageType int
+type messageType int64
 
 const (
 	msgHup messageType = iota
@@ -18,6 +19,7 @@ const (
 	msgVote
 	msgVoteResp
 	msgSnap
+	msgDenied
 )
 
 var mtmap = [...]string{
@@ -29,10 +31,11 @@ var mtmap = [...]string{
 	msgVote:     "msgVote",
 	msgVoteResp: "msgVoteResp",
 	msgSnap:     "msgSnap",
+	msgDenied:   "msgDenied",
 }
 
 func (mt messageType) String() string {
-	return mtmap[int(mt)]
+	return mtmap[int64(mt)]
 }
 
 var errNoLeader = errors.New("no leader")
@@ -43,7 +46,7 @@ const (
 	stateLeader
 )
 
-type stateType int
+type stateType int64
 
 var stmap = [...]string{
 	stateFollower:  "stateFollower",
@@ -58,27 +61,27 @@ var stepmap = [...]stepFunc{
 }
 
 func (st stateType) String() string {
-	return stmap[int(st)]
+	return stmap[int64(st)]
 }
 
 type Message struct {
 	Type     messageType
 	To       int64
 	From     int64
-	Term     int
-	LogTerm  int
-	Index    int
-	PrevTerm int
+	Term     int64
+	LogTerm  int64
+	Index    int64
+	PrevTerm int64
 	Entries  []Entry
-	Commit   int
+	Commit   int64
 	Snapshot Snapshot
 }
 
 type index struct {
-	match, next int
+	match, next int64
 }
 
-func (in *index) update(n int) {
+func (in *index) update(n int64) {
 	in.match = n
 	in.next = n + 1
 }
@@ -89,11 +92,30 @@ func (in *index) decr() {
 	}
 }
 
+// An AtomicInt is an int64 to be accessed atomically.
+type atomicInt int64
+
+func (i *atomicInt) Set(n int64) {
+	atomic.StoreInt64((*int64)(i), n)
+}
+
+func (i *atomicInt) Get() int64 {
+	return atomic.LoadInt64((*int64)(i))
+}
+
+// int64Slice implements sort interface
+type int64Slice []int64
+
+func (p int64Slice) Len() int           { return len(p) }
+func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
+func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+
 type stateMachine struct {
 	id int64
 
 	// the term we are participating in at any time
-	term int
+	term  atomicInt
+	index atomicInt
 
 	// who we voted for in term
 	vote int64
@@ -110,7 +132,7 @@ type stateMachine struct {
 	msgs []Message
 
 	// the leader id
-	lead int64
+	lead atomicInt
 
 	// pending reconfiguration
 	pendingConf bool
@@ -119,7 +141,7 @@ type stateMachine struct {
 }
 
 func newStateMachine(id int64, peers []int64) *stateMachine {
-	sm := &stateMachine{id: id, log: newLog(), ins: make(map[int64]*index)}
+	sm := &stateMachine{id: id, lead: none, log: newLog(), ins: make(map[int64]*index)}
 	for _, p := range peers {
 		sm.ins[p] = &index{}
 	}
@@ -146,7 +168,7 @@ func (sm *stateMachine) poll(id int64, v bool) (granted int) {
 // send persists state to stable storage and then sends to its mailbox.
 func (sm *stateMachine) send(m Message) {
 	m.From = sm.id
-	m.Term = sm.term
+	m.Term = sm.term.Get()
 	sm.msgs = append(sm.msgs, m)
 }
 
@@ -180,14 +202,14 @@ func (sm *stateMachine) bcastAppend() {
 
 func (sm *stateMachine) maybeCommit() bool {
 	// TODO(bmizerany): optimize.. Currently naive
-	mis := make([]int, 0, len(sm.ins))
+	mis := make(int64Slice, 0, len(sm.ins))
 	for i := range sm.ins {
 		mis = append(mis, sm.ins[i].match)
 	}
-	sort.Sort(sort.Reverse(sort.IntSlice(mis)))
+	sort.Sort(sort.Reverse(mis))
 	mci := mis[sm.q()-1]
 
-	return sm.log.maybeCommit(mci, sm.term)
+	return sm.log.maybeCommit(mci, sm.term.Get())
 }
 
 // nextEnts returns the appliable entries and updates the applied index
@@ -195,9 +217,9 @@ func (sm *stateMachine) nextEnts() (ents []Entry) {
 	return sm.log.nextEnts()
 }
 
-func (sm *stateMachine) reset(term int) {
-	sm.term = term
-	sm.lead = none
+func (sm *stateMachine) reset(term int64) {
+	sm.term.Set(term)
+	sm.lead.Set(none)
 	sm.vote = none
 	sm.votes = make(map[int64]bool)
 	for i := range sm.ins {
@@ -213,8 +235,8 @@ func (sm *stateMachine) q() int {
 }
 
 func (sm *stateMachine) appendEntry(e Entry) {
-	e.Term = sm.term
-	sm.log.append(sm.log.lastIndex(), e)
+	e.Term = sm.term.Get()
+	sm.index.Set(sm.log.append(sm.log.lastIndex(), e))
 	sm.ins[sm.id].update(sm.log.lastIndex())
 	sm.maybeCommit()
 }
@@ -226,9 +248,9 @@ func (sm *stateMachine) promotable() bool {
 	return sm.log.committed != 0
 }
 
-func (sm *stateMachine) becomeFollower(term int, lead int64) {
+func (sm *stateMachine) becomeFollower(term int64, lead int64) {
 	sm.reset(term)
-	sm.lead = lead
+	sm.lead.Set(lead)
 	sm.state = stateFollower
 	sm.pendingConf = false
 }
@@ -238,7 +260,7 @@ func (sm *stateMachine) becomeCandidate() {
 	if sm.state == stateLeader {
 		panic("invalid transition [leader -> candidate]")
 	}
-	sm.reset(sm.term + 1)
+	sm.reset(sm.term.Get() + 1)
 	sm.vote = sm.id
 	sm.state = stateCandidate
 }
@@ -248,8 +270,8 @@ func (sm *stateMachine) becomeLeader() {
 	if sm.state == stateFollower {
 		panic("invalid transition [follower -> leader]")
 	}
-	sm.reset(sm.term)
-	sm.lead = sm.id
+	sm.reset(sm.term.Get())
+	sm.lead.Set(sm.id)
 	sm.state = stateLeader
 
 	for _, e := range sm.log.entries(sm.log.committed + 1) {
@@ -288,9 +310,13 @@ func (sm *stateMachine) Step(m Message) (ok bool) {
 	switch {
 	case m.Term == 0:
 		// local message
-	case m.Term > sm.term:
-		sm.becomeFollower(m.Term, m.From)
-	case m.Term < sm.term:
+	case m.Term > sm.term.Get():
+		lead := m.From
+		if m.Type == msgVote {
+			lead = none
+		}
+		sm.becomeFollower(m.Term, lead)
+	case m.Term < sm.term.Get():
 		// ignore
 		return true
 	}
@@ -300,6 +326,7 @@ func (sm *stateMachine) Step(m Message) (ok bool) {
 
 func (sm *stateMachine) handleAppendEntries(m Message) {
 	if sm.log.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...) {
+		sm.index.Set(sm.log.lastIndex())
 		sm.send(Message{To: m.From, Type: msgAppResp, Index: sm.log.lastIndex()})
 	} else {
 		sm.send(Message{To: m.From, Type: msgAppResp, Index: -1})
@@ -361,7 +388,7 @@ func stepCandidate(sm *stateMachine, m Message) bool {
 	case msgProp:
 		return false
 	case msgApp:
-		sm.becomeFollower(sm.term, m.From)
+		sm.becomeFollower(sm.term.Get(), m.From)
 		sm.handleAppendEntries(m)
 	case msgSnap:
 		sm.becomeFollower(m.Term, m.From)
@@ -375,7 +402,7 @@ func stepCandidate(sm *stateMachine, m Message) bool {
 			sm.becomeLeader()
 			sm.bcastAppend()
 		case len(sm.votes) - gr:
-			sm.becomeFollower(sm.term, none)
+			sm.becomeFollower(sm.term.Get(), none)
 		}
 	}
 	return true
@@ -384,12 +411,13 @@ func stepCandidate(sm *stateMachine, m Message) bool {
 func stepFollower(sm *stateMachine, m Message) bool {
 	switch m.Type {
 	case msgProp:
-		if sm.lead == none {
+		if sm.lead.Get() == none {
 			return false
 		}
-		m.To = sm.lead
+		m.To = sm.lead.Get()
 		sm.send(m)
 	case msgApp:
+		sm.lead.Set(m.From)
 		sm.handleAppendEntries(m)
 	case msgSnap:
 		sm.handleSnapshot(m)
@@ -424,6 +452,7 @@ func (sm *stateMachine) restore(s Snapshot) {
 	}
 
 	sm.log.restore(s.Index, s.Term)
+	sm.index.Set(sm.log.lastIndex())
 	sm.ins = make(map[int64]*index)
 	for _, n := range s.Nodes {
 		sm.ins[n] = &index{next: sm.log.lastIndex() + 1}
@@ -435,7 +464,7 @@ func (sm *stateMachine) restore(s Snapshot) {
 	sm.snapshoter.Restore(s)
 }
 
-func (sm *stateMachine) needSnapshot(i int) bool {
+func (sm *stateMachine) needSnapshot(i int64) bool {
 	if i < sm.log.offset {
 		if sm.snapshoter == nil {
 			panic("need snapshot but snapshoter is nil")

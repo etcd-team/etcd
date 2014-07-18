@@ -39,7 +39,7 @@ func TestBuildCluster(t *testing.T) {
 			if tt.ids != nil {
 				w = tt.ids[0]
 			}
-			if g := n.sm.lead; g != w {
+			if g := n.sm.lead.Get(); g != w {
 				t.Errorf("#%d.%d: lead = %d, want %d", i, j, g, w)
 			}
 
@@ -124,7 +124,7 @@ func buildCluster(size int, ids []int64) (nt *network, nodes []*Node) {
 	lead := dictate(nodes[0])
 	lead.Next()
 	for i := 1; i < size; i++ {
-		lead.Add(ids[i], "")
+		lead.Add(ids[i], "", nil)
 		nt.send(lead.Msgs()...)
 		for j := 0; j < i; j++ {
 			nodes[j].Next()

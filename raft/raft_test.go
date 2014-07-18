@@ -33,7 +33,7 @@ func TestLeaderElection(t *testing.T) {
 		if sm.state != tt.state {
 			t.Errorf("#%d: state = %s, want %s", i, sm.state, tt.state)
 		}
-		if g := sm.term; g != 1 {
+		if g := sm.term.Get(); g != 1 {
 			t.Errorf("#%d: term = %d, want %d", i, g, 1)
 		}
 	}
@@ -43,7 +43,7 @@ func TestLogReplication(t *testing.T) {
 	tests := []struct {
 		*network
 		msgs       []Message
-		wcommitted int
+		wcommitted int64
 	}{
 		{
 			newNetwork(nil, nil, nil),
@@ -214,7 +214,7 @@ func TestDuelingCandidates(t *testing.T) {
 	tests := []struct {
 		sm    *stateMachine
 		state stateType
-		term  int
+		term  int64
 		log   *log
 	}{
 		{a, stateFollower, 2, wlog},
@@ -226,7 +226,7 @@ func TestDuelingCandidates(t *testing.T) {
 		if g := tt.sm.state; g != tt.state {
 			t.Errorf("#%d: state = %s, want %s", i, g, tt.state)
 		}
-		if g := tt.sm.term; g != tt.term {
+		if g := tt.sm.term.Get(); g != tt.term {
 			t.Errorf("#%d: term = %d, want %d", i, g, tt.term)
 		}
 		base := ltoa(tt.log)
@@ -365,7 +365,7 @@ func TestProposal(t *testing.T) {
 			}
 		}
 		sm := tt.network.peers[0].(*stateMachine)
-		if g := sm.term; g != 1 {
+		if g := sm.term.Get(); g != 1 {
 			t.Errorf("#%d: term = %d, want %d", i, g, 1)
 		}
 	}
@@ -398,7 +398,7 @@ func TestProposalByProxy(t *testing.T) {
 			}
 		}
 		sm := tt.peers[0].(*stateMachine)
-		if g := sm.term; g != 1 {
+		if g := sm.term.Get(); g != 1 {
 			t.Errorf("#%d: term = %d, want %d", i, g, 1)
 		}
 	}
@@ -406,30 +406,30 @@ func TestProposalByProxy(t *testing.T) {
 
 func TestCommit(t *testing.T) {
 	tests := []struct {
-		matches []int
+		matches []int64
 		logs    []Entry
-		smTerm  int
-		w       int
+		smTerm  int64
+		w       int64
 	}{
 		// single
-		{[]int{1}, []Entry{{}, {Term: 1}}, 1, 1},
-		{[]int{1}, []Entry{{}, {Term: 1}}, 2, 0},
-		{[]int{2}, []Entry{{}, {Term: 1}, {Term: 2}}, 2, 2},
-		{[]int{1}, []Entry{{}, {Term: 2}}, 2, 1},
+		{[]int64{1}, []Entry{{}, {Term: 1}}, 1, 1},
+		{[]int64{1}, []Entry{{}, {Term: 1}}, 2, 0},
+		{[]int64{2}, []Entry{{}, {Term: 1}, {Term: 2}}, 2, 2},
+		{[]int64{1}, []Entry{{}, {Term: 2}}, 2, 1},
 
 		// odd
-		{[]int{2, 1, 1}, []Entry{{}, {Term: 1}, {Term: 2}}, 1, 1},
-		{[]int{2, 1, 1}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
-		{[]int{2, 1, 2}, []Entry{{}, {Term: 1}, {Term: 2}}, 2, 2},
-		{[]int{2, 1, 2}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
+		{[]int64{2, 1, 1}, []Entry{{}, {Term: 1}, {Term: 2}}, 1, 1},
+		{[]int64{2, 1, 1}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
+		{[]int64{2, 1, 2}, []Entry{{}, {Term: 1}, {Term: 2}}, 2, 2},
+		{[]int64{2, 1, 2}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
 
 		// even
-		{[]int{2, 1, 1, 1}, []Entry{{}, {Term: 1}, {Term: 2}}, 1, 1},
-		{[]int{2, 1, 1, 1}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
-		{[]int{2, 1, 1, 2}, []Entry{{}, {Term: 1}, {Term: 2}}, 1, 1},
-		{[]int{2, 1, 1, 2}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
-		{[]int{2, 1, 2, 2}, []Entry{{}, {Term: 1}, {Term: 2}}, 2, 2},
-		{[]int{2, 1, 2, 2}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
+		{[]int64{2, 1, 1, 1}, []Entry{{}, {Term: 1}, {Term: 2}}, 1, 1},
+		{[]int64{2, 1, 1, 1}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
+		{[]int64{2, 1, 1, 2}, []Entry{{}, {Term: 1}, {Term: 2}}, 1, 1},
+		{[]int64{2, 1, 1, 2}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
+		{[]int64{2, 1, 2, 2}, []Entry{{}, {Term: 1}, {Term: 2}}, 2, 2},
+		{[]int64{2, 1, 2, 2}, []Entry{{}, {Term: 1}, {Term: 1}}, 2, 0},
 	}
 
 	for i, tt := range tests {
@@ -437,7 +437,7 @@ func TestCommit(t *testing.T) {
 		for j := 0; j < len(tt.matches); j++ {
 			ins[int64(j)] = &index{tt.matches[j], tt.matches[j] + 1}
 		}
-		sm := &stateMachine{log: &log{ents: tt.logs}, ins: ins, term: tt.smTerm}
+		sm := &stateMachine{log: &log{ents: tt.logs}, ins: ins, term: atomicInt(tt.smTerm)}
 		sm.maybeCommit()
 		if g := sm.log.committed; g != tt.w {
 			t.Errorf("#%d: committed = %d, want %d", i, g, tt.w)
@@ -445,12 +445,68 @@ func TestCommit(t *testing.T) {
 	}
 }
 
+// TestHandleMsgApp ensures:
+// 1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
+// 2. If an existing entry conflicts with a new one (same index but different terms),
+//    delete the existing entry and all that follow it; append any new entries not already in the log.
+// 3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
+func TestHandleMsgApp(t *testing.T) {
+	tests := []struct {
+		m       Message
+		wIndex  int64
+		wCommit int64
+		wAccept bool
+	}{
+		// Ensure 1
+		{Message{Type: msgApp, Term: 2, LogTerm: 3, Index: 2, Commit: 3}, 2, 0, false}, // previous log mismatch
+		{Message{Type: msgApp, Term: 2, LogTerm: 3, Index: 3, Commit: 3}, 2, 0, false}, // previous log non-exist
+
+		// Ensure 2
+		{Message{Type: msgApp, Term: 2, LogTerm: 1, Index: 1, Commit: 1}, 2, 1, true},
+		{Message{Type: msgApp, Term: 2, LogTerm: 0, Index: 0, Commit: 1, Entries: []Entry{{Term: 2}}}, 1, 1, true},
+		{Message{Type: msgApp, Term: 2, LogTerm: 2, Index: 2, Commit: 3, Entries: []Entry{{Term: 2}, {Term: 2}}}, 4, 3, true},
+		{Message{Type: msgApp, Term: 2, LogTerm: 2, Index: 2, Commit: 4, Entries: []Entry{{Term: 2}}}, 3, 3, true},
+		{Message{Type: msgApp, Term: 2, LogTerm: 1, Index: 1, Commit: 4, Entries: []Entry{{Term: 2}}}, 2, 2, true},
+
+		// Ensure 3
+		{Message{Type: msgApp, Term: 2, LogTerm: 2, Index: 2, Commit: 2}, 2, 2, true},
+		{Message{Type: msgApp, Term: 2, LogTerm: 2, Index: 2, Commit: 4}, 2, 2, true}, // commit upto min(commit, last)
+	}
+
+	for i, tt := range tests {
+		sm := &stateMachine{
+			state: stateFollower,
+			term:  2,
+			log:   &log{committed: 0, ents: []Entry{{}, {Term: 1}, {Term: 2}}},
+		}
+
+		sm.handleAppendEntries(tt.m)
+		if sm.log.lastIndex() != tt.wIndex {
+			t.Errorf("#%d: lastIndex = %d, want %d", i, sm.log.lastIndex(), tt.wIndex)
+		}
+		if sm.log.committed != tt.wCommit {
+			t.Errorf("#%d: committed = %d, want %d", i, sm.log.committed, tt.wCommit)
+		}
+		m := sm.Msgs()
+		if len(m) != 1 {
+			t.Errorf("#%d: msg = nil, want 1")
+		}
+		gaccept := true
+		if m[0].Index == -1 {
+			gaccept = false
+		}
+		if gaccept != tt.wAccept {
+			t.Errorf("#%d: accept = %v, want %v", gaccept, tt.wAccept)
+		}
+	}
+}
+
 func TestRecvMsgVote(t *testing.T) {
 	tests := []struct {
 		state   stateType
-		i, term int
+		i, term int64
 		voteFor int64
-		w       int
+		w       int64
 	}{
 		{stateFollower, 0, 0, none, -1},
 		{stateFollower, 0, 1, none, -1},
@@ -504,7 +560,7 @@ func TestStateTransition(t *testing.T) {
 		from   stateType
 		to     stateType
 		wallow bool
-		wterm  int
+		wterm  int64
 		wlead  int64
 	}{
 		{stateFollower, stateFollower, true, 1, none},
@@ -542,10 +598,10 @@ func TestStateTransition(t *testing.T) {
 				sm.becomeLeader()
 			}
 
-			if sm.term != tt.wterm {
-				t.Errorf("%d: term = %d, want %d", i, sm.term, tt.wterm)
+			if sm.term.Get() != tt.wterm {
+				t.Errorf("%d: term = %d, want %d", i, sm.term.Get(), tt.wterm)
 			}
-			if sm.lead != tt.wlead {
+			if sm.lead.Get() != tt.wlead {
 				t.Errorf("%d: lead = %d, want %d", i, sm.lead, tt.wlead)
 			}
 		}()
@@ -579,7 +635,7 @@ func TestConf(t *testing.T) {
 // the uncommitted log entries
 func TestConfChangeLeader(t *testing.T) {
 	tests := []struct {
-		et       int
+		et       int64
 		wPending bool
 	}{
 		{Normal, false},
@@ -605,8 +661,8 @@ func TestAllServerStepdown(t *testing.T) {
 		state stateType
 
 		wstate stateType
-		wterm  int
-		windex int
+		wterm  int64
+		windex int64
 	}{
 		{stateFollower, stateFollower, 3, 1},
 		{stateCandidate, stateFollower, 3, 1},
@@ -614,7 +670,7 @@ func TestAllServerStepdown(t *testing.T) {
 	}
 
 	tmsgTypes := [...]messageType{msgVote, msgApp}
-	tterm := 3
+	tterm := int64(3)
 
 	for i, tt := range tests {
 		sm := newStateMachine(0, []int64{0, 1, 2})
@@ -629,16 +685,23 @@ func TestAllServerStepdown(t *testing.T) {
 		}
 
 		for j, msgType := range tmsgTypes {
-			sm.Step(Message{Type: msgType, Term: tterm, LogTerm: tterm})
+			sm.Step(Message{From: 1, Type: msgType, Term: tterm, LogTerm: tterm})
 
 			if sm.state != tt.wstate {
 				t.Errorf("#%d.%d state = %v , want %v", i, j, sm.state, tt.wstate)
 			}
-			if sm.term != tt.wterm {
-				t.Errorf("#%d.%d term = %v , want %v", i, j, sm.term, tt.wterm)
+			if sm.term.Get() != tt.wterm {
+				t.Errorf("#%d.%d term = %v , want %v", i, j, sm.term.Get(), tt.wterm)
 			}
-			if len(sm.log.ents) != tt.windex {
+			if int64(len(sm.log.ents)) != tt.windex {
 				t.Errorf("#%d.%d index = %v , want %v", i, j, len(sm.log.ents), tt.windex)
+			}
+			wlead := int64(1)
+			if msgType == msgVote {
+				wlead = none
+			}
+			if sm.lead.Get() != wlead {
+				t.Errorf("#%d, sm.lead = %d, want %d", i, sm.lead.Get(), none)
 			}
 		}
 	}
@@ -646,10 +709,10 @@ func TestAllServerStepdown(t *testing.T) {
 
 func TestLeaderAppResp(t *testing.T) {
 	tests := []struct {
-		index      int
+		index      int64
 		wmsgNum    int
-		windex     int
-		wcommitted int
+		windex     int64
+		wcommitted int64
 	}{
 		{-1, 1, 1, 0}, // bad resp; leader does not commit; reply with log entries
 		{2, 2, 2, 2},  // good resp; leader commits; broadcast with commit index
@@ -663,7 +726,7 @@ func TestLeaderAppResp(t *testing.T) {
 		sm.becomeCandidate()
 		sm.becomeLeader()
 		sm.Msgs()
-		sm.Step(Message{From: 1, Type: msgAppResp, Index: tt.index, Term: sm.term})
+		sm.Step(Message{From: 1, Type: msgAppResp, Index: tt.index, Term: sm.term.Get()})
 		msgs := sm.Msgs()
 
 		if len(msgs) != tt.wmsgNum {
@@ -695,7 +758,7 @@ func TestRecvMsgBeat(t *testing.T) {
 	for i, tt := range tests {
 		sm := newStateMachine(0, []int64{0, 1, 2})
 		sm.log = &log{ents: []Entry{{}, {Term: 0}, {Term: 1}}}
-		sm.term = 1
+		sm.term.Set(1)
 		sm.state = tt.state
 		sm.Step(Message{Type: msgBeat})
 
@@ -714,7 +777,7 @@ func TestRecvMsgBeat(t *testing.T) {
 func TestMaybeCompact(t *testing.T) {
 	tests := []struct {
 		snapshoter Snapshoter
-		applied    int
+		applied    int64
 		wCompact   bool
 	}{
 		{nil, defaultCompactThreshold + 1, false},
@@ -726,7 +789,7 @@ func TestMaybeCompact(t *testing.T) {
 		sm := newStateMachine(0, []int64{0, 1, 2})
 		sm.setSnapshoter(tt.snapshoter)
 		for i := 0; i < defaultCompactThreshold*2; i++ {
-			sm.log.append(i, Entry{Term: i + 1})
+			sm.log.append(int64(i), Entry{Term: int64(i + 1)})
 		}
 		sm.log.applied = tt.applied
 		sm.log.committed = tt.applied
@@ -891,7 +954,7 @@ func TestSlowNodeRestore(t *testing.T) {
 	}
 }
 
-func ents(terms ...int) *stateMachine {
+func ents(terms ...int64) *stateMachine {
 	ents := []Entry{{}}
 	for _, term := range terms {
 		ents = append(ents, Entry{Term: term})
@@ -1022,7 +1085,7 @@ type logSnapshoter struct {
 	snapshot Snapshot
 }
 
-func (s *logSnapshoter) Snap(index, term int, nodes []int64) {
+func (s *logSnapshoter) Snap(index, term int64, nodes []int64) {
 	s.snapshot = Snapshot{
 		Index: index,
 		Term:  term,
@@ -1036,10 +1099,3 @@ func (s *logSnapshoter) Restore(ss Snapshot) {
 func (s *logSnapshoter) GetSnap() Snapshot {
 	return s.snapshot
 }
-
-// int64Slice implements sort interface
-type int64Slice []int64
-
-func (p int64Slice) Len() int           { return len(p) }
-func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
-func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }

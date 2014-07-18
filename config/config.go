@@ -18,34 +18,10 @@ import (
 
 	"github.com/coreos/etcd/log"
 	ustrings "github.com/coreos/etcd/pkg/strings"
-	"github.com/coreos/etcd/server"
 )
 
 // The default location for the etcd configuration file.
 const DefaultSystemConfigPath = "/etc/etcd/etcd.conf"
-
-// A lookup of deprecated flags to their new flag name.
-var newFlagNameLookup = map[string]string{
-	"C":                      "peers",
-	"CF":                     "peers-file",
-	"n":                      "name",
-	"c":                      "addr",
-	"cl":                     "bind-addr",
-	"s":                      "peer-addr",
-	"sl":                     "peer-bind-addr",
-	"d":                      "data-dir",
-	"m":                      "max-result-buffer",
-	"r":                      "max-retry-attempts",
-	"maxsize":                "max-cluster-size",
-	"clientCAFile":           "ca-file",
-	"clientCert":             "cert-file",
-	"clientKey":              "key-file",
-	"serverCAFile":           "peer-ca-file",
-	"serverCert":             "peer-cert-file",
-	"serverKey":              "peer-key-file",
-	"snapshotCount":          "snapshot-count",
-	"peer-heartbeat-timeout": "peer-heartbeat-interval",
-}
 
 // Config represents the server configuration.
 type Config struct {
@@ -103,14 +79,14 @@ func New() *Config {
 	c.Snapshot = true
 	c.SnapshotCount = 10000
 	c.Peer.Addr = "127.0.0.1:7001"
-	c.Peer.HeartbeatInterval = defaultHeartbeatInterval
-	c.Peer.ElectionTimeout = defaultElectionTimeout
+	c.Peer.HeartbeatInterval = DefaultHeartbeatInterval
+	c.Peer.ElectionTimeout = DefaultElectionTimeout
 	rand.Seed(time.Now().UTC().UnixNano())
 	// Make maximum twice as minimum.
-	c.RetryInterval = float64(50+rand.Int()%50) * defaultHeartbeatInterval / 1000
-	c.Cluster.ActiveSize = server.DefaultActiveSize
-	c.Cluster.RemoveDelay = server.DefaultRemoveDelay
-	c.Cluster.SyncInterval = server.DefaultSyncInterval
+	c.RetryInterval = float64(50+rand.Int()%50) * DefaultHeartbeatInterval / 1000
+	c.Cluster.ActiveSize = DefaultActiveSize
+	c.Cluster.RemoveDelay = DefaultRemoveDelay
+	c.Cluster.SyncInterval = DefaultSyncInterval
 	return c
 }
 
@@ -278,37 +254,9 @@ func (c *Config) LoadFlags(arguments []string) error {
 	f.StringVar(&path, "config", "", "")
 	// BEGIN IGNORED FLAGS
 
-	// BEGIN DEPRECATED FLAGS
-	f.StringVar(&peers, "C", "", "(deprecated)")
-	f.StringVar(&c.PeersFile, "CF", c.PeersFile, "(deprecated)")
-	f.StringVar(&c.Name, "n", c.Name, "(deprecated)")
-	f.StringVar(&c.Addr, "c", c.Addr, "(deprecated)")
-	f.StringVar(&c.BindAddr, "cl", c.BindAddr, "(deprecated)")
-	f.StringVar(&c.Peer.Addr, "s", c.Peer.Addr, "(deprecated)")
-	f.StringVar(&c.Peer.BindAddr, "sl", c.Peer.BindAddr, "(deprecated)")
-	f.StringVar(&c.Peer.CAFile, "serverCAFile", c.Peer.CAFile, "(deprecated)")
-	f.StringVar(&c.Peer.CertFile, "serverCert", c.Peer.CertFile, "(deprecated)")
-	f.StringVar(&c.Peer.KeyFile, "serverKey", c.Peer.KeyFile, "(deprecated)")
-	f.StringVar(&c.CAFile, "clientCAFile", c.CAFile, "(deprecated)")
-	f.StringVar(&c.CertFile, "clientCert", c.CertFile, "(deprecated)")
-	f.StringVar(&c.KeyFile, "clientKey", c.KeyFile, "(deprecated)")
-	f.StringVar(&c.DataDir, "d", c.DataDir, "(deprecated)")
-	f.IntVar(&c.MaxResultBuffer, "m", c.MaxResultBuffer, "(deprecated)")
-	f.IntVar(&c.MaxRetryAttempts, "r", c.MaxRetryAttempts, "(deprecated)")
-	f.IntVar(&c.SnapshotCount, "snapshotCount", c.SnapshotCount, "(deprecated)")
-	f.IntVar(&c.Peer.HeartbeatInterval, "peer-heartbeat-timeout", c.Peer.HeartbeatInterval, "(deprecated)")
-	// END DEPRECATED FLAGS
-
 	if err := f.Parse(arguments); err != nil {
 		return err
 	}
-
-	// Print deprecation warnings on STDERR.
-	f.Visit(func(f *flag.Flag) {
-		if len(newFlagNameLookup[f.Name]) > 0 {
-			fmt.Fprintf(os.Stderr, "[deprecated] use -%s, not -%s\n", newFlagNameLookup[f.Name], f.Name)
-		}
-	})
 
 	// Convert some parameters to lists.
 	if peers != "" {
@@ -406,8 +354,8 @@ func (c *Config) Sanitize() error {
 }
 
 // EtcdTLSInfo retrieves a TLSInfo object for the etcd server
-func (c *Config) EtcdTLSInfo() *server.TLSInfo {
-	return &server.TLSInfo{
+func (c *Config) EtcdTLSInfo() *TLSInfo {
+	return &TLSInfo{
 		CAFile:   c.CAFile,
 		CertFile: c.CertFile,
 		KeyFile:  c.KeyFile,
@@ -415,8 +363,8 @@ func (c *Config) EtcdTLSInfo() *server.TLSInfo {
 }
 
 // PeerRaftInfo retrieves a TLSInfo object for the peer server.
-func (c *Config) PeerTLSInfo() *server.TLSInfo {
-	return &server.TLSInfo{
+func (c *Config) PeerTLSInfo() *TLSInfo {
+	return &TLSInfo{
 		CAFile:   c.Peer.CAFile,
 		CertFile: c.Peer.CertFile,
 		KeyFile:  c.Peer.KeyFile,
@@ -434,8 +382,8 @@ func (c *Config) Trace() bool {
 	return c.strTrace == "*"
 }
 
-func (c *Config) ClusterConfig() *server.ClusterConfig {
-	return &server.ClusterConfig{
+func (c *Config) ClusterConfig() *ClusterConfig {
+	return &ClusterConfig{
 		ActiveSize:   c.Cluster.ActiveSize,
 		RemoveDelay:  c.Cluster.RemoveDelay,
 		SyncInterval: c.Cluster.SyncInterval,

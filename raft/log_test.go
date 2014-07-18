@@ -5,14 +5,69 @@ import (
 	"testing"
 )
 
+// TestAppend ensures:
+// 1. If an existing entry conflicts with a new one (same index
+// but different terms), delete the existing entry and all that
+// follow it
+// 2.Append any new entries not already in the log
+func TestAppend(t *testing.T) {
+	previousEnts := []Entry{{Term: 1}, {Term: 2}}
+	tests := []struct {
+		after  int64
+		ents   []Entry
+		windex int64
+		wents  []Entry
+	}{
+		{
+			2,
+			[]Entry{},
+			2,
+			[]Entry{{Term: 1}, {Term: 2}},
+		},
+		{
+			2,
+			[]Entry{{Term: 2}},
+			3,
+			[]Entry{{Term: 1}, {Term: 2}, {Term: 2}},
+		},
+		// conflicts with index 1
+		{
+			0,
+			[]Entry{{Term: 2}},
+			1,
+			[]Entry{{Term: 2}},
+		},
+		// conflicts with index 2
+		{
+			1,
+			[]Entry{{Term: 3}, {Term: 3}},
+			3,
+			[]Entry{{Term: 1}, {Term: 3}, {Term: 3}},
+		},
+	}
+
+	for i, tt := range tests {
+		log := newLog()
+		log.ents = append(log.ents, previousEnts...)
+		index := log.append(tt.after, tt.ents...)
+		if index != tt.windex {
+			t.Errorf("#%d: lastIndex = %d, want %d", i, index, tt.windex)
+		}
+		if g := log.entries(1); !reflect.DeepEqual(g, tt.wents) {
+			t.Errorf("#%d: logEnts = %+v, want %+v", i, g, tt.wents)
+		}
+	}
+}
+
 // TestCompactionSideEffects ensures that all the log related funcationality works correctly after
 // a compaction.
 func TestCompactionSideEffects(t *testing.T) {
-	lastIndex := 1000
+	var i int64
+	lastIndex := int64(1000)
 	log := newLog()
 
-	for i := 0; i < lastIndex; i++ {
-		log.append(i, Entry{Term: i + 1})
+	for i = 0; i < lastIndex; i++ {
+		log.append(int64(i), Entry{Term: int64(i + 1)})
 	}
 
 	log.compact(500)
@@ -49,15 +104,15 @@ func TestCompactionSideEffects(t *testing.T) {
 func TestCompaction(t *testing.T) {
 	tests := []struct {
 		app     int
-		compact []int
+		compact []int64
 		wleft   []int
 		wallow  bool
 	}{
 		// out of upper bound
-		{1000, []int{1001}, []int{-1}, false},
-		{1000, []int{300, 500, 800, 900}, []int{701, 501, 201, 101}, true},
+		{1000, []int64{1001}, []int{-1}, false},
+		{1000, []int64{300, 500, 800, 900}, []int{701, 501, 201, 101}, true},
 		// out of lower bound
-		{1000, []int{300, 299}, []int{701, -1}, false},
+		{1000, []int64{300, 299}, []int{701, -1}, false},
 	}
 
 	for i, tt := range tests {
@@ -72,7 +127,7 @@ func TestCompaction(t *testing.T) {
 
 			log := newLog()
 			for i := 0; i < tt.app; i++ {
-				log.append(i, Entry{})
+				log.append(int64(i), Entry{})
 			}
 
 			for j := 0; j < len(tt.compact); j++ {
@@ -86,13 +141,14 @@ func TestCompaction(t *testing.T) {
 }
 
 func TestLogRestore(t *testing.T) {
+	var i int64
 	log := newLog()
-	for i := 0; i < 100; i++ {
+	for i = 0; i < 100; i++ {
 		log.append(i, Entry{Term: i + 1})
 	}
 
-	index := 1000
-	term := 1000
+	index := int64(1000)
+	term := int64(1000)
 	log.restore(index, term)
 
 	// only has the guard entry
@@ -114,12 +170,12 @@ func TestLogRestore(t *testing.T) {
 }
 
 func TestIsOutOfBounds(t *testing.T) {
-	offset := 100
-	num := 100
+	offset := int64(100)
+	num := int64(100)
 	l := &log{offset: offset, ents: make([]Entry, num)}
 
 	tests := []struct {
-		index int
+		index int64
 		w     bool
 	}{
 		{offset - 1, true},
@@ -138,16 +194,17 @@ func TestIsOutOfBounds(t *testing.T) {
 }
 
 func TestAt(t *testing.T) {
-	offset := 100
-	num := 100
+	var i int64
+	offset := int64(100)
+	num := int64(100)
 
 	l := &log{offset: offset}
-	for i := 0; i < num; i++ {
+	for i = 0; i < num; i++ {
 		l.ents = append(l.ents, Entry{Term: i})
 	}
 
 	tests := []struct {
-		index int
+		index int64
 		w     *Entry
 	}{
 		{offset - 1, nil},
@@ -166,17 +223,18 @@ func TestAt(t *testing.T) {
 }
 
 func TestSlice(t *testing.T) {
-	offset := 100
-	num := 100
+	var i int64
+	offset := int64(100)
+	num := int64(100)
 
 	l := &log{offset: offset}
-	for i := 0; i < num; i++ {
+	for i = 0; i < num; i++ {
 		l.ents = append(l.ents, Entry{Term: i})
 	}
 
 	tests := []struct {
-		from int
-		to   int
+		from int64
+		to   int64
 		w    []Entry
 	}{
 		{offset - 1, offset + 1, nil},

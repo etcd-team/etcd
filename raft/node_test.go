@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestTickMsgHup(t *testing.T) {
 	// simulate to patch the join log
 	n.Step(Message{Type: msgApp, Commit: 1, Entries: []Entry{Entry{}}})
 
-	for i := 0; i < defaultElection+1; i++ {
+	for i := 0; i < defaultElection*2; i++ {
 		n.Tick()
 	}
 
@@ -36,10 +37,10 @@ func TestTickMsgBeat(t *testing.T) {
 	n := dictate(New(0, defaultHeartbeat, defaultElection))
 	n.Next()
 	for i := 1; i < k; i++ {
-		n.Add(int64(i), "")
+		n.Add(int64(i), "", nil)
 		for _, m := range n.Msgs() {
 			if m.Type == msgApp {
-				n.Step(Message{From: m.To, Type: msgAppResp, Index: m.Index + len(m.Entries)})
+				n.Step(Message{From: m.To, Type: msgAppResp, Index: m.Index + int64(len(m.Entries))})
 			}
 		}
 		// ignore commit index update messages
@@ -72,13 +73,14 @@ func TestResetElapse(t *testing.T) {
 	}{
 		{Message{From: 0, To: 1, Type: msgApp, Term: 2, Entries: []Entry{{Term: 1}}}, 0},
 		{Message{From: 0, To: 1, Type: msgApp, Term: 1, Entries: []Entry{{Term: 1}}}, 1},
-		{Message{From: 0, To: 1, Type: msgVote, Term: 2}, 0},
+		{Message{From: 0, To: 1, Type: msgVote, Term: 2, Index: 1, LogTerm: 1}, 0},
 		{Message{From: 0, To: 1, Type: msgVote, Term: 1}, 1},
 	}
 
 	for i, tt := range tests {
 		n := New(0, defaultHeartbeat, defaultElection)
 		n.sm = newStateMachine(0, []int64{0, 1, 2})
+		n.sm.log.append(0, Entry{Type: Normal, Term: 1})
 		n.sm.term = 2
 		n.sm.log.committed = 1
 
@@ -112,7 +114,7 @@ func TestStartCluster(t *testing.T) {
 func TestAdd(t *testing.T) {
 	n := dictate(New(0, defaultHeartbeat, defaultElection))
 	n.Next()
-	n.Add(1, "")
+	n.Add(1, "", nil)
 	n.Next()
 
 	if len(n.sm.ins) != 2 {
@@ -126,7 +128,7 @@ func TestAdd(t *testing.T) {
 func TestRemove(t *testing.T) {
 	n := dictate(New(0, defaultHeartbeat, defaultElection))
 	n.Next()
-	n.Add(1, "")
+	n.Add(1, "", nil)
 	n.Next()
 	n.Remove(0)
 	n.Step(Message{Type: msgAppResp, From: 1, Term: 1, Index: 4})
@@ -140,8 +142,54 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestDenial(t *testing.T) {
+	logents := []Entry{
+		{Type: AddNode, Term: 1, Data: []byte(`{"NodeId":1}`)},
+		{Type: AddNode, Term: 1, Data: []byte(`{"NodeId":2}`)},
+		{Type: RemoveNode, Term: 1, Data: []byte(`{"NodeId":2}`)},
+	}
+
+	tests := []struct {
+		ent     Entry
+		wdenied map[int64]bool
+	}{
+		{
+			Entry{Type: AddNode, Term: 1, Data: []byte(`{"NodeId":2}`)},
+			map[int64]bool{0: false, 1: false, 2: false},
+		},
+		{
+			Entry{Type: RemoveNode, Term: 1, Data: []byte(`{"NodeId":1}`)},
+			map[int64]bool{0: false, 1: true, 2: true},
+		},
+		{
+			Entry{Type: RemoveNode, Term: 1, Data: []byte(`{"NodeId":0}`)},
+			map[int64]bool{0: true, 1: false, 2: true},
+		},
+	}
+
+	for i, tt := range tests {
+		n := dictate(New(0, defaultHeartbeat, defaultElection))
+		n.Next()
+		n.Msgs()
+		n.sm.log.append(n.sm.log.committed, append(logents, tt.ent)...)
+		n.sm.log.committed += int64(len(logents) + 1)
+		n.Next()
+
+		for id, denied := range tt.wdenied {
+			n.Step(Message{From: id, To: 0, Type: msgApp, Term: 1})
+			w := []Message{}
+			if denied {
+				w = []Message{{From: 0, To: id, Term: 1, Type: msgDenied}}
+			}
+			if g := n.Msgs(); !reflect.DeepEqual(g, w) {
+				t.Errorf("#%d: msgs for %d = %+v, want %+v", i, id, g, w)
+			}
+		}
+	}
+}
+
 func dictate(n *Node) *Node {
 	n.Step(Message{Type: msgHup})
-	n.Add(n.Id(), "")
+	n.Add(n.Id(), "", nil)
 	return n
 }

@@ -1,44 +1,74 @@
-/*
-Copyright 2013 CoreOS Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
+	"log"
+	"math/rand"
+	"net"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/coreos/etcd/config"
 	"github.com/coreos/etcd/etcd"
-	"github.com/coreos/etcd/server"
+	ehttp "github.com/coreos/etcd/http"
 )
 
 func main() {
 	var config = config.New()
 	if err := config.Load(os.Args[1:]); err != nil {
-		fmt.Println(server.Usage() + "\n")
-		fmt.Println(err.Error() + "\n")
+		fmt.Println(etcd.Usage() + "\n")
+		fmt.Println(err.Error(), "\n")
 		os.Exit(1)
 	} else if config.ShowVersion {
-		fmt.Println("etcd version", server.ReleaseVersion)
+		fmt.Println("0.5")
 		os.Exit(0)
 	} else if config.ShowHelp {
-		fmt.Println(server.Usage() + "\n")
 		os.Exit(0)
 	}
 
-	var etcd = etcd.New(config)
-	etcd.Run()
+	e := etcd.New(config, genId())
+	go e.Run()
+
+	corsInfo, err := ehttp.NewCORSInfo(config.CorsOrigins)
+	if err != nil {
+		log.Fatal("cors:", err)
+	}
+
+	go func() {
+		serve("raft", config.Peer.BindAddr, config.PeerTLSInfo(), corsInfo, e.RaftHandler())
+	}()
+	serve("etcd", config.BindAddr, config.EtcdTLSInfo(), corsInfo, e)
+}
+
+func genId() int64 {
+	r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+	return r.Int63()
+}
+
+func serve(who string, addr string, tinfo *config.TLSInfo, cinfo *ehttp.CORSInfo, handler http.Handler) {
+	t, terr := tinfo.ServerConfig()
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("%v server starts listening on %v\n", who, addr)
+
+	switch tinfo.Scheme() {
+	case "http":
+		log.Printf("%v server starts serving HTTP\n", who)
+
+	case "https":
+		if t == nil {
+			log.Fatalf("failed to create %v tls: %v\n", who, terr)
+		}
+		l = tls.NewListener(l, t)
+		log.Printf("%v server starts serving HTTPS\n", who)
+	default:
+		log.Fatal("unsupported http scheme", tinfo.Scheme())
+	}
+
+	h := &ehttp.CORSHandler{handler, cinfo}
+	log.Fatal(http.Serve(l, h))
 }
