@@ -20,9 +20,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,12 +39,7 @@ func TestMultipleNodes(t *testing.T) {
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, false)
 		waitCluster(t, es)
-		for i := range es {
-			es[len(es)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
@@ -52,12 +50,7 @@ func TestMultipleTLSNodes(t *testing.T) {
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, true)
 		waitCluster(t, es)
-		for i := range es {
-			es[len(es)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
@@ -85,12 +78,7 @@ func TestV2Redirect(t *testing.T) {
 	}
 
 	resp.Body.Close()
-	for i := range es {
-		es[len(es)-i-1].Stop()
-	}
-	for i := range hs {
-		hs[len(hs)-i-1].Close()
-	}
+	destoryCluster(t, es, hs)
 	afterTest(t)
 }
 
@@ -147,12 +135,7 @@ func TestAdd(t *testing.T) {
 			}
 		}
 
-		for i := range hs {
-			es[len(hs)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
@@ -209,12 +192,7 @@ func TestRemove(t *testing.T) {
 			waitMode(standbyMode, es[i])
 		}
 
-		for i := range es {
-			es[len(hs)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 	// ensure that no goroutines are running
@@ -271,12 +249,7 @@ func TestBecomeStandby(t *testing.T) {
 			t.Errorf("#%d: lead = %d, want %d", i, g, lead)
 		}
 
-		for i := range hs {
-			es[len(hs)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
@@ -340,6 +313,61 @@ func TestVersionCheck(t *testing.T) {
 	}
 }
 
+func TestSingleNodeRecovery(t *testing.T) {
+	id := genId()
+	dataDir, err := ioutil.TempDir(os.TempDir(), "etcd")
+	if err != nil {
+		panic(err)
+	}
+	c := config.New()
+	c.DataDir = dataDir
+	e, h, _ := buildServer(t, c, id)
+	key := "/foo"
+
+	ev, err := e.p.Set(key, false, "bar", time.Now().Add(time.Second*100))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := e.p.Watch(key, false, false, ev.Index())
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case v := <-w.EventChan:
+		if v.Node.TTL < 95 {
+			t.Errorf("ttl = %d, want >= 95", v.Node.TTL)
+		}
+	case <-time.After(8 * defaultHeartbeat * e.tickDuration):
+		t.Fatal("watch timeout")
+	}
+
+	e.Stop()
+	h.Close()
+
+	time.Sleep(2 * time.Second)
+
+	c = config.New()
+	c.DataDir = dataDir
+	e, h, _ = buildServer(t, c, id)
+
+	waitLeader([]*Server{e})
+	w, err = e.p.Watch(key, false, false, ev.Index())
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case v := <-w.EventChan:
+		if v.Node.TTL > 99 {
+			t.Errorf("ttl = %d, want <= 99", v.Node.TTL)
+		}
+	case <-time.After(8 * defaultHeartbeat * e.tickDuration):
+		t.Fatal("2nd watch timeout")
+	}
+
+	destroyServer(t, e, h)
+}
+
 func buildCluster(number int, tls bool) ([]*Server, []*httptest.Server) {
 	bootstrapper := 0
 	es := make([]*Server, number)
@@ -371,23 +399,86 @@ func buildCluster(number int, tls bool) ([]*Server, []*httptest.Server) {
 }
 
 func initTestServer(c *config.Config, id int64, tls bool) (e *Server, h *httptest.Server) {
-	e = New(c)
+	if c.DataDir == "" {
+		n, err := ioutil.TempDir(os.TempDir(), "etcd")
+		if err != nil {
+			panic(err)
+		}
+		c.DataDir = n
+	}
+	addr := c.Addr
+
+	srv, err := New(c)
+	if err != nil {
+		panic(err)
+	}
+	e = srv
 	e.setId(id)
 	e.SetTick(time.Millisecond * 5)
+
 	m := http.NewServeMux()
 	m.Handle("/", e)
 	m.Handle("/raft", e.RaftHandler())
 	m.Handle("/raft/", e.RaftHandler())
 
-	if tls {
-		h = httptest.NewTLSServer(m)
+	if addr == "127.0.0.1:4001" {
+		if tls {
+			h = httptest.NewTLSServer(m)
+		} else {
+			h = httptest.NewServer(m)
+		}
 	} else {
-		h = httptest.NewServer(m)
+		var l net.Listener
+		var err error
+		for {
+			l, err = net.Listen("tcp", addr)
+			if err == nil {
+				break
+			}
+			if !strings.Contains(err.Error(), "address already in use") {
+				panic(err)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		h = &httptest.Server{
+			Listener: l,
+			Config:   &http.Server{Handler: m},
+		}
+		if tls {
+			h.StartTLS()
+		} else {
+			h.Start()
+		}
 	}
-
 	e.raftPubAddr = h.URL
 	e.pubAddr = h.URL
+
 	return
+}
+
+func destoryCluster(t *testing.T, es []*Server, hs []*httptest.Server) {
+	for i := range es {
+		e := es[len(es)-i-1]
+		e.Stop()
+		err := os.RemoveAll(e.config.DataDir)
+		if err != nil {
+			panic(err)
+			t.Fatal(err)
+		}
+	}
+	for i := range hs {
+		hs[len(hs)-i-1].Close()
+	}
+}
+
+func destroyServer(t *testing.T, e *Server, h *httptest.Server) {
+	e.Stop()
+	h.Close()
+	err := os.RemoveAll(e.config.DataDir)
+	if err != nil {
+		panic(err)
+		t.Fatal(err)
+	}
 }
 
 func waitCluster(t *testing.T, es []*Server) {

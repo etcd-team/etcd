@@ -17,69 +17,97 @@ limitations under the License.
 package etcd
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/coreos/etcd/config"
 	"github.com/coreos/etcd/store"
+
+	"github.com/coreos/etcd/third_party/github.com/coreos/go-etcd/etcd"
 )
 
 func TestKillLeader(t *testing.T) {
-	tests := []int{3, 5, 9, 11}
+	tests := []int{3, 5, 9}
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
 		waitCluster(t, es)
-		waitLeader(es)
 
-		lead := es[0].p.node.Leader()
-		es[lead].Stop()
+		var totalTime time.Duration
+		for j := 0; j < tt; j++ {
+			lead, _ := waitLeader(es)
+			es[lead].Stop()
+			hs[lead].Close()
+			time.Sleep(es[0].tickDuration * defaultElection * 2)
 
-		time.Sleep(es[0].tickDuration * defaultElection * 2)
+			start := time.Now()
+			if g, _ := waitLeader(es); g == lead {
+				t.Errorf("#%d.%d: lead = %d, want not %d", i, j, g, lead)
+			}
+			take := time.Now().Sub(start)
+			totalTime += take
+			avgTime := totalTime / (time.Duration)(i+1)
+			fmt.Println("Total time:", totalTime, "; Avg time:", avgTime)
 
-		waitLeader(es)
-		if es[1].p.node.Leader() == 0 {
-			t.Errorf("#%d: lead = %d, want not 0", i, es[1].p.node.Leader())
+			c := config.New()
+			c.DataDir = es[lead].config.DataDir
+			c.Addr = hs[lead].Listener.Addr().String()
+			id := es[lead].id
+			e, h, err := buildServer(t, c, id)
+			if err != nil {
+				t.Fatalf("#%d.%d: %v", i, j, err)
+			}
+			es[lead] = e
+			hs[lead] = h
 		}
 
-		for i := range es {
-			es[len(es)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
 
-func TestRandomKill(t *testing.T) {
-	tests := []int{3, 5, 9, 11}
+func TestKillRandom(t *testing.T) {
+	tests := []int{3, 5, 9}
 
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, false)
 		waitCluster(t, es)
-		waitLeader(es)
 
-		toKill := make(map[int64]struct{})
-		for len(toKill) != tt/2-1 {
-			toKill[rand.Int63n(int64(tt))] = struct{}{}
-		}
-		for k := range toKill {
-			es[k].Stop()
+		for j := 0; j < tt; j++ {
+			waitLeader(es)
+
+			toKill := make(map[int64]struct{})
+			for len(toKill) != tt/2-1 {
+				toKill[rand.Int63n(int64(tt))] = struct{}{}
+			}
+			for k := range toKill {
+				es[k].Stop()
+				hs[k].Close()
+			}
+
+			time.Sleep(es[0].tickDuration * defaultElection * 2)
+
+			waitLeader(es)
+
+			for k := range toKill {
+				c := config.New()
+				c.DataDir = es[k].config.DataDir
+				c.Addr = hs[k].Listener.Addr().String()
+				id := es[k].id
+				e, h, err := buildServer(t, c, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				es[k] = e
+				hs[k] = h
+			}
 		}
 
-		time.Sleep(es[0].tickDuration * defaultElection * 2)
-
-		waitLeader(es)
-
-		for i := range es {
-			es[len(es)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
@@ -106,12 +134,132 @@ func TestJoinThroughFollower(t *testing.T) {
 		}
 		waitCluster(t, es)
 
-		for i := range hs {
-			es[len(hs)-i-1].Stop()
+		destoryCluster(t, es, hs)
+	}
+	afterTest(t)
+}
+
+func TestClusterConfigReload(t *testing.T) {
+	tests := []int{3, 4, 5, 6}
+
+	for i, tt := range tests {
+		es, hs := buildCluster(tt, false)
+		waitCluster(t, es)
+
+		lead, _ := waitLeader(es)
+		conf := config.NewClusterConfig()
+		conf.ActiveSize = 15
+		conf.RemoveDelay = 60
+		if err := es[lead].p.setClusterConfig(conf); err != nil {
+			t.Fatalf("#%d: setClusterConfig err = %v", i, err)
 		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
+
+		for k := range es {
+			es[k].Stop()
+			hs[k].Close()
 		}
+
+		for k := range es {
+			c := config.New()
+			c.DataDir = es[k].config.DataDir
+			c.Addr = hs[k].Listener.Addr().String()
+			id := es[k].id
+			e, h, err := buildServer(t, c, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			es[k] = e
+			hs[k] = h
+		}
+
+		lead, _ = waitLeader(es)
+		if g := es[lead].p.clusterConfig(); !reflect.DeepEqual(g, conf) {
+			t.Errorf("#%d: clusterConfig = %+v, want %+v", i, g, conf)
+		}
+
+		destoryCluster(t, es, hs)
+	}
+	afterTest(t)
+}
+
+func TestMultiNodeKillOne(t *testing.T) {
+	tests := []int{5}
+
+	for i, tt := range tests {
+		es, hs := buildCluster(tt, false)
+		waitCluster(t, es)
+
+		stop := make(chan bool)
+		go keepSetting(hs[0].URL, stop)
+
+		for j := 0; j < 10; j++ {
+			idx := rand.Int() % tt
+			es[idx].Stop()
+			hs[idx].Close()
+
+			c := config.New()
+			c.DataDir = es[idx].config.DataDir
+			c.Addr = hs[idx].Listener.Addr().String()
+			id := es[idx].id
+			e, h, err := buildServer(t, c, id)
+			if err != nil {
+				t.Fatalf("#%d.%d: %v", i, j, err)
+			}
+			es[idx] = e
+			hs[idx] = h
+		}
+
+		stop <- true
+		<-stop
+
+		destoryCluster(t, es, hs)
+	}
+	afterTest(t)
+}
+
+func TestMultiNodeKillAllAndRecovery(t *testing.T) {
+	tests := []int{5}
+
+	for i, tt := range tests {
+		es, hs := buildCluster(tt, false)
+		waitCluster(t, es)
+		waitLeader(es)
+
+		c := etcd.NewClient([]string{hs[0].URL})
+		for i := 0; i < 10; i++ {
+			if _, err := c.Set("foo", "bar", 0); err != nil {
+				panic(err)
+			}
+		}
+
+		for k := range es {
+			es[k].Stop()
+			hs[k].Close()
+		}
+
+		for k := range es {
+			c := config.New()
+			c.DataDir = es[k].config.DataDir
+			c.Addr = hs[k].Listener.Addr().String()
+			id := es[k].id
+			e, h, err := buildServer(t, c, id)
+			if err != nil {
+				t.Fatalf("#%d.%d: %v", i, k, err)
+			}
+			es[k] = e
+			hs[k] = h
+		}
+
+		waitLeader(es)
+		res, err := c.Set("foo", "bar", 0)
+		if err != nil {
+			t.Fatalf("#%d: set err after recovery: %v", err)
+		}
+		if g := res.Node.ModifiedIndex; g != 16 {
+			t.Errorf("#%d: modifiedIndex = %d, want %d", i, g, 16)
+		}
+
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
 }
@@ -127,12 +275,7 @@ func BenchmarkEndToEndSet(b *testing.B) {
 		}
 	}
 	b.StopTimer()
-	for i := range hs {
-		es[len(hs)-i-1].Stop()
-	}
-	for i := range hs {
-		hs[len(hs)-i-1].Close()
-	}
+	destoryCluster(nil, es, hs)
 }
 
 // TODO(yichengq): cannot handle previous msgDenial correctly now
@@ -187,14 +330,44 @@ func TestModeSwitch(t *testing.T) {
 			}
 		}
 
-		for i := range hs {
-			es[len(hs)-i-1].Stop()
-		}
-		for i := range hs {
-			hs[len(hs)-i-1].Close()
-		}
+		destoryCluster(t, es, hs)
 	}
 	afterTest(t)
+}
+
+// Sending set commands
+func keepSetting(urlStr string, stop chan bool) {
+	stopSet := false
+	i := 0
+	c := etcd.NewClient([]string{urlStr})
+	for {
+		key := fmt.Sprintf("%s_%v", "foo", i)
+
+		result, err := c.Set(key, "bar", 0)
+
+		if err != nil || result.Node.Key != "/"+key || result.Node.Value != "bar" {
+			select {
+			case <-stop:
+				stopSet = true
+
+			default:
+			}
+		}
+
+		select {
+		case <-stop:
+			stopSet = true
+
+		default:
+		}
+
+		if stopSet {
+			break
+		}
+
+		i++
+	}
+	stop <- true
 }
 
 type leadterm struct {

@@ -72,7 +72,7 @@ type State struct {
 	Commit int64
 }
 
-var emptyState = State{}
+var EmptyState = State{}
 
 type Message struct {
 	Type      messageType
@@ -588,4 +588,18 @@ func (sm *stateMachine) setState(vote, term, commit int64) {
 	sm.unstableState.Vote = vote
 	sm.unstableState.Term = term
 	sm.unstableState.Commit = commit
+}
+
+func (sm *stateMachine) loadEnts(ents []Entry) {
+	if !sm.raftLog.isEmpty() {
+		panic("cannot load entries when log is not empty")
+	}
+	sm.raftLog.append(0, ents...)
+	sm.raftLog.unstable = sm.raftLog.lastIndex() + 1
+}
+
+func (sm *stateMachine) loadState(state State) {
+	sm.raftLog.committed = state.Commit
+	sm.setTerm(state.Term)
+	sm.setVote(state.Vote)
 }

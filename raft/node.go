@@ -51,6 +51,13 @@ func New(id int64, heartbeat, election tick) *Node {
 	return n
 }
 
+func Recover(id int64, ents []Entry, state State, heartbeat, election tick) *Node {
+	n := New(id, heartbeat, election)
+	n.sm.loadEnts(ents)
+	n.sm.loadState(state)
+	return n
+}
+
 func (n *Node) Id() int64 { return n.sm.id }
 
 func (n *Node) ClusterId() int64 { return n.sm.clusterId }
@@ -197,6 +204,11 @@ func (n *Node) Tick() {
 	}
 }
 
+// IsEmpty returns ture if the log of the node is empty.
+func (n *Node) IsEmpty() bool {
+	return n.sm.raftLog.isEmpty()
+}
+
 func (n *Node) UpdateConf(t int64, c *Config) {
 	data, err := json.Marshal(c)
 	if err != nil {
@@ -212,8 +224,8 @@ func (n *Node) UnstableEnts() (int64, []Entry) {
 }
 
 func (n *Node) UnstableState() State {
-	if n.sm.unstableState == emptyState {
-		return emptyState
+	if n.sm.unstableState == EmptyState {
+		return EmptyState
 	}
 	s := n.sm.unstableState
 	n.sm.clearState()
