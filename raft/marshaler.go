@@ -1,9 +1,9 @@
 package raft
 
-var (
-	InfoType  = int64(1)
-	EntryType = int64(2)
-	StateType = int64(3)
+const (
+	InfoType int64 = iota + 1
+	EntryType
+	StateType
 )
 
 type Marshaler interface {
