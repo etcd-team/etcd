@@ -62,14 +62,14 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestSaveEntry(t *testing.T) {
+func TestSave(t *testing.T) {
 	p := path.Join(os.TempDir(), "waltest")
 	w, err := New(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := &raft.Entry{Type: 1, Index: 1, Term: 1, Data: []byte{1}}
-	err = w.SaveEntry(e)
+	err = w.Save(e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,74 +81,6 @@ func TestSaveEntry(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b, entryRecord) {
 		t.Errorf("ent = %q, want %q", b, entryRecord)
-	}
-
-	err = os.Remove(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSaveInfo(t *testing.T) {
-	p := path.Join(os.TempDir(), "waltest")
-	w, err := New(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	i := &raft.Info{Id: int64(0xBEEF)}
-	err = w.SaveInfo(i)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// make sure we can only write info at the head of the wal file
-	// still in buffer
-	err = w.SaveInfo(i)
-	if err == nil || err.Error() != "cannot write info at 18, expect 0" {
-		t.Errorf("err = %v, want cannot write info at 18, expect 0", err)
-	}
-
-	// sync to disk
-	w.Sync()
-	err = w.SaveInfo(i)
-	if err == nil || err.Error() != "cannot write info at 18, expect 0" {
-		t.Errorf("err = %v, want cannot write info at 18, expect 0", err)
-	}
-	w.Close()
-
-	b, err := ioutil.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(b, infoRecord) {
-		t.Errorf("ent = %q, want %q", b, infoRecord)
-	}
-
-	err = os.Remove(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSaveState(t *testing.T) {
-	p := path.Join(os.TempDir(), "waltest")
-	w, err := New(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := &raft.State{Term: 1, Vote: 1, Commit: 1}
-	err = w.SaveState(st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-
-	b, err := ioutil.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(b, stateRecord) {
-		t.Errorf("ent = %q, want %q", b, stateRecord)
 	}
 
 	err = os.Remove(p)
@@ -196,18 +128,18 @@ func TestLoadNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := &raft.Info{Id: int64(0xBEEF)}
-	if err = w.SaveInfo(i); err != nil {
+	if err = w.Save(i); err != nil {
 		t.Fatal(err)
 	}
 	ents := []raft.Entry{{Type: 1, Index: 1, Term: 1, Data: []byte{1}}, {Type: 2, Index: 2, Term: 2, Data: []byte{2}}}
 	for _, e := range ents {
-		if err = w.SaveEntry(&e); err != nil {
+		if err = w.Save(&e); err != nil {
 			t.Fatal(err)
 		}
 	}
 	sts := []raft.State{{Term: 1, Vote: 1, Commit: 1}, {Term: 2, Vote: 2, Commit: 2}}
 	for _, s := range sts {
-		if err = w.SaveState(&s); err != nil {
+		if err = w.Save(&s); err != nil {
 			t.Fatal(err)
 		}
 	}

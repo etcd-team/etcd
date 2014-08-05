@@ -123,7 +123,7 @@ func newParticipant(id int64, pubAddr string, raftPubAddr string, dir string, cl
 		}
 		p.node.Node = raft.New(p.id, defaultHeartbeat, defaultElection)
 		info := p.node.Info()
-		if err = w.SaveInfo(&info); err != nil {
+		if err = w.Save(&info); err != nil {
 			return nil, err
 		}
 		log.Printf("id=%x participant.new path=%s\n", p.id, walPath)
@@ -387,12 +387,12 @@ func (p *participant) apply(ents []raft.Entry) {
 
 func (p *participant) save(ents []raft.Entry, state raft.State) {
 	for _, ent := range ents {
-		if err := p.w.SaveEntry(&ent); err != nil {
+		if err := p.w.Save(&ent); err != nil {
 			log.Panicf("id=%x participant.save saveEntryErr=%q", p.id, err)
 		}
 	}
 	if !state.IsEmpty() {
-		if err := p.w.SaveState(&state); err != nil {
+		if err := p.w.Save(&state); err != nil {
 			log.Panicf("id=%x participant.save saveStateErr=%q", p.id, err)
 		}
 	}
