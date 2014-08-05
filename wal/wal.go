@@ -28,6 +28,11 @@ import (
 	"github.com/coreos/etcd/raft"
 )
 
+type Marshaler interface {
+	Marshal() ([]byte, error)
+	MarshalType() int64
+}
+
 type WAL struct {
 	f   *os.File
 	bw  *bufio.Writer
@@ -77,7 +82,7 @@ func (w *WAL) Close() {
 	}
 }
 
-func (w *WAL) Save(m raft.Marshaler) error {
+func (w *WAL) Save(m Marshaler) error {
 	b, err := m.Marshal()
 	if err != nil {
 		panic(err)

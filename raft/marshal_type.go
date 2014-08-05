@@ -6,11 +6,6 @@ const (
 	StateType
 )
 
-type Marshaler interface {
-	Marshal() ([]byte, error)
-	MarshalType() int64
-}
-
 func (i *Info) MarshalType() int64 {
 	return InfoType
 }
