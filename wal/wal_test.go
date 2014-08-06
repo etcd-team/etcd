@@ -27,14 +27,8 @@ import (
 )
 
 var (
-	infoData   = []byte("\b\xef\xfd\x02")
-	infoRecord = append([]byte("\n\x00\x00\x00\x00\x00\x00\x00\b\x01\x10\x00\x1a\x04"), infoData...)
-
-	stateData   = []byte("\b\x01\x10\x01\x18\x01")
-	stateRecord = append([]byte("\f\x00\x00\x00\x00\x00\x00\x00\b\x03\x10\x00\x1a\x06"), stateData...)
-
-	entryData   = []byte("\b\x01\x10\x01\x18\x01\x22\x01\x01")
-	entryRecord = append([]byte("\x0f\x00\x00\x00\x00\x00\x00\x00\b\x02\x10\x00\x1a\t"), entryData...)
+	data   = []byte("\b\x01\x10\x01\x18\x01\x22\x01\x01")
+	record = append([]byte("\x0f\x00\x00\x00\x00\x00\x00\x00\b\x02\x10\x00\x1a\t"), data...)
 )
 
 func TestNew(t *testing.T) {
@@ -62,14 +56,14 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestSaveEntry(t *testing.T) {
+func TestSave(t *testing.T) {
 	p := path.Join(os.TempDir(), "waltest")
 	w, err := New(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := &raft.Entry{Type: 1, Index: 1, Term: 1, Data: []byte{1}}
-	err = w.SaveEntry(e)
+	err = w.Save(e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,113 +73,13 @@ func TestSaveEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(b, entryRecord) {
-		t.Errorf("ent = %q, want %q", b, entryRecord)
+	if !reflect.DeepEqual(b, record) {
+		t.Errorf("ent = %q, want %q", b, record)
 	}
 
 	err = os.Remove(p)
 	if err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestSaveInfo(t *testing.T) {
-	p := path.Join(os.TempDir(), "waltest")
-	w, err := New(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	i := &raft.Info{Id: int64(0xBEEF)}
-	err = w.SaveInfo(i)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// make sure we can only write info at the head of the wal file
-	// still in buffer
-	err = w.SaveInfo(i)
-	if err == nil || err.Error() != "cannot write info at 18, expect 0" {
-		t.Errorf("err = %v, want cannot write info at 18, expect 0", err)
-	}
-
-	// sync to disk
-	w.Sync()
-	err = w.SaveInfo(i)
-	if err == nil || err.Error() != "cannot write info at 18, expect 0" {
-		t.Errorf("err = %v, want cannot write info at 18, expect 0", err)
-	}
-	w.Close()
-
-	b, err := ioutil.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(b, infoRecord) {
-		t.Errorf("ent = %q, want %q", b, infoRecord)
-	}
-
-	err = os.Remove(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSaveState(t *testing.T) {
-	p := path.Join(os.TempDir(), "waltest")
-	w, err := New(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := &raft.State{Term: 1, Vote: 1, Commit: 1}
-	err = w.SaveState(st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-
-	b, err := ioutil.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(b, stateRecord) {
-		t.Errorf("ent = %q, want %q", b, stateRecord)
-	}
-
-	err = os.Remove(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLoadInfo(t *testing.T) {
-	i, err := loadInfo(infoData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if i.Id != 0xBEEF {
-		t.Errorf("id = %x, want 0xBEEF", i.Id)
-	}
-}
-
-func TestLoadEntry(t *testing.T) {
-	e, err := loadEntry(entryData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	we := raft.Entry{Type: 1, Index: 1, Term: 1, Data: []byte{1}}
-	if !reflect.DeepEqual(e, we) {
-		t.Errorf("ent = %v, want %v", e, we)
-	}
-}
-
-func TestLoadState(t *testing.T) {
-	s, err := loadState(stateData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ws := raft.State{Term: 1, Vote: 1, Commit: 1}
-	if !reflect.DeepEqual(s, ws) {
-		t.Errorf("state = %v, want %v", s, ws)
 	}
 }
 
@@ -196,18 +90,18 @@ func TestLoadNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := &raft.Info{Id: int64(0xBEEF)}
-	if err = w.SaveInfo(i); err != nil {
+	if err = w.Save(i); err != nil {
 		t.Fatal(err)
 	}
 	ents := []raft.Entry{{Type: 1, Index: 1, Term: 1, Data: []byte{1}}, {Type: 2, Index: 2, Term: 2, Data: []byte{2}}}
 	for _, e := range ents {
-		if err = w.SaveEntry(&e); err != nil {
+		if err = w.Save(&e); err != nil {
 			t.Fatal(err)
 		}
 	}
 	sts := []raft.State{{Term: 1, Vote: 1, Commit: 1}, {Term: 2, Vote: 2, Commit: 2}}
 	for _, s := range sts {
-		if err = w.SaveState(&s); err != nil {
+		if err = w.Save(&s); err != nil {
 			t.Fatal(err)
 		}
 	}

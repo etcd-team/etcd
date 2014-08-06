@@ -21,6 +21,8 @@ import (
 	"io"
 	"reflect"
 	"testing"
+
+	"github.com/coreos/etcd/raft"
 )
 
 func TestReadRecord(t *testing.T) {
@@ -29,11 +31,11 @@ func TestReadRecord(t *testing.T) {
 		wr   *Record
 		we   error
 	}{
-		{infoRecord, &Record{Type: 1, Crc: 0, Data: infoData}, nil},
+		{record, &Record{Type: raft.EntryType, Crc: 0, Data: data}, nil},
 		{[]byte(""), &Record{}, io.EOF},
-		{infoRecord[:len(infoRecord)-len(infoData)-8], &Record{}, io.ErrUnexpectedEOF},
-		{infoRecord[:len(infoRecord)-len(infoData)], &Record{}, io.ErrUnexpectedEOF},
-		{infoRecord[:len(infoRecord)-8], &Record{}, io.ErrUnexpectedEOF},
+		{record[:len(record)-len(data)-8], &Record{}, io.ErrUnexpectedEOF},
+		{record[:len(record)-len(data)], &Record{}, io.ErrUnexpectedEOF},
+		{record[:len(record)-8], &Record{}, io.ErrUnexpectedEOF},
 	}
 
 	rec := &Record{}

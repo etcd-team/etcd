@@ -28,11 +28,10 @@ import (
 	"github.com/coreos/etcd/raft"
 )
 
-var (
-	infoType  = int64(1)
-	entryType = int64(2)
-	stateType = int64(3)
-)
+type Marshaler interface {
+	Marshal() ([]byte, error)
+	MarshalType() int64
+}
 
 type WAL struct {
 	f   *os.File
@@ -83,37 +82,12 @@ func (w *WAL) Close() {
 	}
 }
 
-func (w *WAL) SaveInfo(i *raft.Info) error {
-	log.Printf("path=%s wal.saveInfo id=%d", w.f.Name(), i.Id)
-	if err := w.checkAtHead(); err != nil {
-		return err
-	}
-	b, err := i.Marshal()
+func (w *WAL) Save(m Marshaler) error {
+	b, err := m.Marshal()
 	if err != nil {
 		panic(err)
 	}
-	rec := &Record{Type: infoType, Data: b}
-	return writeRecord(w.bw, rec)
-}
-
-func (w *WAL) SaveEntry(e *raft.Entry) error {
-	log.Printf("path=%s wal.saveEntry ent=\"%+v\"", w.f.Name(), e)
-	b, err := e.Marshal()
-	if err != nil {
-		panic(err)
-	}
-	rec := &Record{Type: entryType, Data: b}
-	return writeRecord(w.bw, rec)
-}
-
-func (w *WAL) SaveState(s *raft.State) error {
-	log.Printf("path=%s wal.saveState state=\"%+v\"", w.f.Name(), s)
-	b, err := s.Marshal()
-	if err != nil {
-		panic(err)
-	}
-	rec := &Record{Type: stateType, Data: b}
-	return writeRecord(w.bw, rec)
+	return writeRecord(w.bw, &Record{Type: m.MarshalType(), Data: b})
 }
 
 func (w *WAL) checkAtHead() error {
@@ -145,7 +119,7 @@ func (w *WAL) LoadNode() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	if rec.Type != infoType {
+	if rec.Type != raft.InfoType {
 		return nil, fmt.Errorf("the first block of wal is not infoType but %d", rec.Type)
 	}
 	i, err := loadInfo(rec.Data)
@@ -157,13 +131,13 @@ func (w *WAL) LoadNode() (*Node, error) {
 	var state raft.State
 	for err = readRecord(br, rec); err == nil; err = readRecord(br, rec) {
 		switch rec.Type {
-		case entryType:
+		case raft.EntryType:
 			e, err := loadEntry(rec.Data)
 			if err != nil {
 				return nil, err
 			}
 			ents = append(ents[:e.Index-1], e)
-		case stateType:
+		case raft.StateType:
 			s, err := loadState(rec.Data)
 			if err != nil {
 				return nil, err
