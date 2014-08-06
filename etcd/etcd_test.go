@@ -107,9 +107,9 @@ func TestRemove(t *testing.T) {
 			cl.Start()
 
 			lead, _ := cl.Leader()
-			config := conf.NewClusterConfig()
-			config.ActiveSize = 0
-			if err := cl.Participant(int(lead)).setClusterConfig(config); err != nil {
+			cfg := conf.NewClusterConfig()
+			cfg.ActiveSize = 0
+			if err := cl.Participant(int(lead)).setClusterConfig(cfg); err != nil {
 				t.Fatalf("#%d: setClusterConfig err = %v", k, err)
 			}
 
@@ -146,6 +146,28 @@ func TestRemove(t *testing.T) {
 // maxSize -> standby
 // auto-demote -> standby
 // remove -> standby
+
+func TestDecreaseActiveSize(t *testing.T) {
+	cl := &testCluster{Size: 9}
+	cl.Start()
+	defer cl.Destroy()
+
+	lead, _ := cl.Leader()
+	if g := len(cl.Participant(int(lead)).node.Nodes()); g != cl.Size {
+		t.Errorf("size = %d, want %d", g, cl.Size)
+	}
+
+	cfg := conf.NewClusterConfig()
+	cfg.ActiveSize = cl.Size - 1
+	if err := cl.Participant(int(lead)).setClusterConfig(cfg); err != nil {
+		t.Fatalf("setClusterConfig err = %v", err)
+	}
+
+	time.Sleep(sizeCheckInterval)
+	if g := len(cl.Participant(int(lead)).node.Nodes()); g != cl.Size-1 {
+		t.Errorf("size = %d, want %d", g, cl.Size-1)
+	}
+}
 
 func TestReleaseVersion(t *testing.T) {
 	defer afterTest(t)

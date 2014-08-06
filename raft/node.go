@@ -192,6 +192,10 @@ func (n *Node) Next() []Entry {
 				log.Printf("raft: err=%q", err)
 				continue
 			}
+			if c.ExpectedSize > 0 && len(n.sm.ins)-1 != c.ExpectedSize {
+				ents[i].becomeNoop()
+				break
+			}
 			n.sm.removeNode(c.NodeId)
 			n.rmNodes[c.NodeId] = struct{}{}
 			if c.NodeId == n.sm.id {

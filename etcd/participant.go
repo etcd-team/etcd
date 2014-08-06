@@ -54,6 +54,8 @@ const (
 	v2StoreStatsPrefix    = "/v2/stats/store"
 	v2adminConfigPrefix   = "/v2/admin/config"
 	v2adminMachinesPrefix = "/v2/admin/machines/"
+
+	sizeCheckInterval = time.Second
 )
 
 var (
@@ -189,9 +191,12 @@ func (p *participant) run(stop chan struct{}) {
 	defer ticker.Stop()
 	v2SyncTicker := time.NewTicker(time.Millisecond * 500)
 	defer v2SyncTicker.Stop()
+	v2SizeCheckTicker := time.NewTicker(sizeCheckInterval)
+	defer v2SizeCheckTicker.Stop()
 
 	var proposal chan v2Proposal
 	var addNodeC, removeNodeC chan raft.Config
+	var v2SizeCheckC <-chan time.Time
 	for {
 		if node.HasLeader() {
 			proposal = p.proposal
@@ -201,6 +206,11 @@ func (p *participant) run(stop chan struct{}) {
 			proposal = nil
 			addNodeC = nil
 			removeNodeC = nil
+		}
+		if node.IsLeader() {
+			v2SizeCheckC = v2SizeCheckTicker.C
+		} else {
+			v2SizeCheckC = nil
 		}
 		select {
 		case p := <-proposal:
@@ -215,6 +225,8 @@ func (p *participant) run(stop chan struct{}) {
 			node.Tick()
 		case <-v2SyncTicker.C:
 			node.Sync()
+		case <-v2SizeCheckC:
+			p.maybeShrinkSize()
 		case <-stop:
 			log.Printf("id=%x participant.stop\n", p.id)
 			return
@@ -361,17 +373,13 @@ func (p *participant) apply(ents []raft.Entry) {
 				log.Printf("id=%x participant.cluster.addNode unmarshalErr=\"%v\"\n", p.id, err)
 				break
 			}
-			pp := path.Join(v2machineKVPrefix, fmt.Sprint(cfg.NodeId))
-			if ev, _ := p.Store.Get(pp, false, false); ev != nil {
-				log.Printf("id=%x participant.cluster.addNode err=existed value=%q", p.id, *ev.Node.Value)
-				break
-			}
 			peer, err := p.peerHub.add(cfg.NodeId, cfg.Addr)
 			if err != nil {
 				log.Printf("id=%x participant.cluster.addNode peerAddErr=\"%v\"\n", p.id, err)
 				break
 			}
 			peer.participate()
+			pp := path.Join(v2machineKVPrefix, fmt.Sprint(cfg.NodeId))
 			p.Store.Set(pp, false, fmt.Sprintf("raft=%v&etcd=%v", cfg.Addr, string(cfg.Context)), store.Permanent)
 			if p.id == cfg.NodeId {
 				p.raftPubAddr = cfg.Addr
@@ -413,6 +421,21 @@ func (p *participant) save(ents []raft.Entry, state raft.State) {
 		log.Panicf("id=%x participant.save syncErr=%q", p.id, err)
 	}
 
+}
+
+func (p *participant) maybeShrinkSize() {
+	nodes := p.node.Nodes()
+	activeSize := p.clusterConfig().ActiveSize
+	if activeSize <= 0 || len(nodes) <= activeSize {
+		return
+	}
+	log.Printf("id=%x participant.checkActiveSize size=%d expectedSize=%d", p.id, len(nodes), activeSize)
+	rmId := nodes[0]
+	if activeSize > 1 && rmId == p.id {
+		rmId = nodes[1]
+	}
+	p.node.UpdateConf(raft.RemoveNode, &raft.Config{NodeId: rmId, ExpectedSize: len(nodes) - 1})
+	log.Printf("id=%x participant.checkActiveSize remove=%d", p.id, rmId)
 }
 
 func (p *participant) send(msgs []raft.Message) {
