@@ -322,7 +322,8 @@ func TestSingleNodeRecovery(t *testing.T) {
 	}
 	c := config.New()
 	c.DataDir = dataDir
-	e, h, _ := buildServer(t, c, id)
+	e, h := initTestServer(c, id, false)
+	startServer(t, e)
 	key := "/foo"
 
 	ev, err := e.p.Set(key, false, "bar", time.Now().Add(time.Second*100))
@@ -350,7 +351,8 @@ func TestSingleNodeRecovery(t *testing.T) {
 
 	c = config.New()
 	c.DataDir = dataDir
-	e, h, _ = buildServer(t, c, id)
+	e, h = initTestServer(c, id, false)
+	startServer(t, e)
 
 	waitLeader([]*Server{e})
 	w, err = e.p.Watch(key, false, false, ev.Index())
