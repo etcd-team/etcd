@@ -24,7 +24,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/coreos/etcd/config"
 )
@@ -58,7 +57,7 @@ func TestBadDiscoveryService(t *testing.T) {
 	c := config.New()
 	c.Discovery = ts.URL + "/v2/keys/_etcd/registry/1"
 	e, h := newUnstartedTestServer(c, bootstrapId, false)
-	err := startServer(t, e)
+	err := startCluster([]*Server{e})
 	w := `discovery service error`
 	if err == nil || !strings.HasPrefix(err.Error(), w) {
 		t.Errorf("err = %v, want %s prefix", err, w)
@@ -80,13 +79,12 @@ func TestBadDiscoveryServiceWithAdvisedPeers(t *testing.T) {
 	ts := httptest.NewServer(&g)
 
 	es, hs := buildCluster(1, false)
-	waitCluster(t, es)
 
 	c := config.New()
 	c.Discovery = ts.URL + "/v2/keys/_etcd/registry/1"
 	c.Peers = []string{hs[0].URL}
 	e, h := newUnstartedTestServer(c, bootstrapId, false)
-	err := startServer(t, e)
+	err := startCluster([]*Server{e})
 	w := `discovery service error`
 	if err == nil || !strings.HasPrefix(err.Error(), w) {
 		t.Errorf("err = %v, want %s prefix", err, w)
@@ -102,7 +100,7 @@ func TestBootstrapByEmptyPeers(t *testing.T) {
 	c := config.New()
 	id := genId()
 	e, h := newUnstartedTestServer(c, id, false)
-	err := startServer(t, e)
+	err := startCluster([]*Server{e})
 
 	if err != nil {
 		t.Error(err)
@@ -116,12 +114,12 @@ func TestBootstrapByEmptyPeers(t *testing.T) {
 
 func TestBootstrapByDiscoveryService(t *testing.T) {
 	de, dh := newUnstartedTestServer(config.New(), genId(), false)
-	err := startServer(t, de)
+	err := startCluster([]*Server{de})
 
 	c := config.New()
 	c.Discovery = dh.URL + "/v2/keys/_etcd/registry/1"
 	e, h := newUnstartedTestServer(c, bootstrapId, false)
-	err = startServer(t, e)
+	err = startCluster([]*Server{e})
 	if err != nil {
 		t.Fatalf("build server err = %v, want nil", err)
 	}
@@ -133,12 +131,11 @@ func TestBootstrapByDiscoveryService(t *testing.T) {
 
 func TestRunByAdvisedPeers(t *testing.T) {
 	es, hs := buildCluster(1, false)
-	waitCluster(t, es)
 
 	c := config.New()
 	c.Peers = []string{hs[0].URL}
 	e, h := newUnstartedTestServer(c, bootstrapId, false)
-	err := startServer(t, e)
+	err := startCluster([]*Server{e})
 	if err != nil {
 		t.Fatalf("build server err = %v, want nil", err)
 	}
@@ -154,7 +151,7 @@ func TestRunByAdvisedPeers(t *testing.T) {
 
 func TestRunByDiscoveryService(t *testing.T) {
 	de, dh := newUnstartedTestServer(config.New(), genId(), false)
-	err := startServer(t, de)
+	err := startCluster([]*Server{de})
 
 	tc := NewTestClient()
 	v := url.Values{}
@@ -175,7 +172,7 @@ func TestRunByDiscoveryService(t *testing.T) {
 	c := config.New()
 	c.Discovery = dh.URL + "/v2/keys/_etcd/registry/1"
 	e, h := newUnstartedTestServer(c, bootstrapId, false)
-	err = startServer(t, e)
+	err = startCluster([]*Server{e})
 	if err != nil {
 		t.Fatalf("build server err = %v, want nil", err)
 	}
@@ -191,19 +188,4 @@ func TestRunByDiscoveryService(t *testing.T) {
 
 func TestRunByDataDir(t *testing.T) {
 	TestSingleNodeRecovery(t)
-}
-
-func startServer(t *testing.T, e *Server) error {
-	var err error
-	go func() { err = e.Run() }()
-	for {
-		if e.mode.Get() == participantMode {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return nil
 }

@@ -33,7 +33,6 @@ import (
 
 func TestMachinesEndPoint(t *testing.T) {
 	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
 
 	w := make([]string, len(hs))
 	for i := range hs {
@@ -65,7 +64,6 @@ func TestMachinesEndPoint(t *testing.T) {
 
 func TestLeaderEndPoint(t *testing.T) {
 	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
 
 	us := make([]string, len(hs))
 	for i := range hs {
@@ -97,7 +95,6 @@ func TestLeaderEndPoint(t *testing.T) {
 
 func TestStoreStatsEndPoint(t *testing.T) {
 	es, hs := buildCluster(1, false)
-	waitCluster(t, es)
 
 	resp, err := http.Get(hs[0].URL + v2StoreStatsPrefix)
 	if err != nil {
@@ -121,7 +118,6 @@ func TestStoreStatsEndPoint(t *testing.T) {
 
 func TestGetAdminConfigEndPoint(t *testing.T) {
 	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
 
 	for i := range hs {
 		r, err := http.Get(hs[i].URL + v2adminConfigPrefix)
@@ -177,7 +173,6 @@ func TestPutAdminConfigEndPoint(t *testing.T) {
 
 	for i, tt := range tests {
 		es, hs := buildCluster(3, false)
-		waitCluster(t, es)
 		index := es[0].p.Index()
 
 		r, err := NewTestClient().Put(hs[0].URL+v2adminConfigPrefix, "application/json", bytes.NewBufferString(tt.c))
@@ -212,7 +207,6 @@ func TestPutAdminConfigEndPoint(t *testing.T) {
 
 func TestGetAdminMachineEndPoint(t *testing.T) {
 	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
 
 	for i := range es {
 		for j := range hs {
@@ -257,7 +251,6 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 
 func TestGetAdminMachinesEndPoint(t *testing.T) {
 	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
 
 	w := make([]*machineMessage, len(hs))
 	for i := range hs {

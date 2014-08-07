@@ -36,7 +36,6 @@ func TestKillLeader(t *testing.T) {
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		var totalTime time.Duration
 		for j := 0; j < tt; j++ {
@@ -59,7 +58,7 @@ func TestKillLeader(t *testing.T) {
 			c.Addr = hs[lead].Listener.Addr().String()
 			id := es[lead].id
 			e, h := newUnstartedTestServer(c, id, false)
-			err := startServer(t, e)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatalf("#%d.%d: %v", i, j, err)
 			}
@@ -77,7 +76,6 @@ func TestKillRandom(t *testing.T) {
 
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		for j := 0; j < tt; j++ {
 			waitLeader(es)
@@ -101,7 +99,7 @@ func TestKillRandom(t *testing.T) {
 				c.Addr = hs[k].Listener.Addr().String()
 				id := es[k].id
 				e, h := newUnstartedTestServer(c, id, false)
-				err := startServer(t, e)
+				err := startCluster([]*Server{e})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -135,7 +133,7 @@ func TestJoinThroughFollower(t *testing.T) {
 			go es[i].Run()
 			waitLeader(es[:i])
 		}
-		waitCluster(t, es)
+		waitCluster(es)
 
 		destoryCluster(t, es, hs)
 	}
@@ -147,7 +145,6 @@ func TestClusterConfigReload(t *testing.T) {
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		lead, _ := waitLeader(es)
 		conf := config.NewClusterConfig()
@@ -168,7 +165,7 @@ func TestClusterConfigReload(t *testing.T) {
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
 			e, h := newUnstartedTestServer(c, id, false)
-			err := startServer(t, e)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +190,6 @@ func TestMultiNodeKillOne(t *testing.T) {
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		stop := make(chan bool)
 		go keepSetting(hs[0].URL, stop)
@@ -208,7 +204,7 @@ func TestMultiNodeKillOne(t *testing.T) {
 			c.Addr = hs[idx].Listener.Addr().String()
 			id := es[idx].id
 			e, h := newUnstartedTestServer(c, id, false)
-			err := startServer(t, e)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatalf("#%d.%d: %v", i, j, err)
 			}
@@ -229,7 +225,6 @@ func TestMultiNodeKillAllAndRecovery(t *testing.T) {
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 		waitLeader(es)
 
 		c := etcd.NewClient([]string{hs[0].URL})
@@ -250,7 +245,7 @@ func TestMultiNodeKillAllAndRecovery(t *testing.T) {
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
 			e, h := newUnstartedTestServer(c, id, false)
-			err := startServer(t, e)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatalf("#%d.%d: %v", i, k, err)
 			}
@@ -294,7 +289,6 @@ func TestModeSwitch(t *testing.T) {
 
 	for i := 0; i < size; i++ {
 		es, hs := buildCluster(size, false)
-		waitCluster(t, es)
 
 		config := config.NewClusterConfig()
 		config.SyncInterval = 0
@@ -314,7 +308,9 @@ func TestModeSwitch(t *testing.T) {
 				t.Fatalf("#%d: remove err = %v", i, err)
 			}
 
-			waitMode(standbyMode, es[i])
+			if err := waitMode(standbyMode, es[i], nil); err != nil {
+				t.Fatalf("#%d: waitMode err = %v", i, err)
+			}
 
 			for k := 0; k < 4; k++ {
 				if es[i].s.leader != noneId {
@@ -331,7 +327,9 @@ func TestModeSwitch(t *testing.T) {
 				t.Fatalf("#%d: setClusterConfig err = %v", i, err)
 			}
 
-			waitMode(participantMode, es[i])
+			if err := waitMode(participantMode, es[i], nil); err != nil {
+				t.Fatalf("#%d: waitMode err = %v", i, err)
+			}
 
 			if err := checkParticipant(i, es); err != nil {
 				t.Errorf("#%d: check alive err = %v", i, err)
