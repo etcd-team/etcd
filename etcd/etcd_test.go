@@ -595,27 +595,6 @@ func waitMode(mode int64, e *Server, errC chan error) error {
 	return fmt.Errorf("waitMode timeout 50ms")
 }
 
-// checkParticipant checks the i-th server works well as participant.
-func checkParticipant(i int, es []*Server) error {
-	lead, _ := waitActiveLeader(es)
-	key := fmt.Sprintf("/%d", rand.Int31())
-	ev, err := es[lead].p.Set(key, false, "bar", store.Permanent)
-	if err != nil {
-		return err
-	}
-
-	w, err := es[i].p.Watch(key, false, false, ev.Index())
-	if err != nil {
-		return err
-	}
-	select {
-	case <-w.EventChan:
-	case <-time.After(8 * defaultHeartbeat * es[i].tickDuration):
-		return fmt.Errorf("watch timeout")
-	}
-	return nil
-}
-
 func newTestConfig() *config.Config {
 	c := config.New()
 	c.Addr = "127.0.0.1:0"
