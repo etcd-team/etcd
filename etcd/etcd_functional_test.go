@@ -53,7 +53,7 @@ func TestKillLeader(t *testing.T) {
 			avgTime := totalTime / (time.Duration)(i+1)
 			fmt.Println("Total time:", totalTime, "; Avg time:", avgTime)
 
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[lead].config.DataDir
 			c.Addr = hs[lead].Listener.Addr().String()
 			id := es[lead].id
@@ -94,7 +94,7 @@ func TestKillRandom(t *testing.T) {
 			waitLeader(es)
 
 			for k := range toKill {
-				c := config.New()
+				c := newTestConfig()
 				c.DataDir = es[k].config.DataDir
 				c.Addr = hs[k].Listener.Addr().String()
 				id := es[k].id
@@ -120,7 +120,7 @@ func TestJoinThroughFollower(t *testing.T) {
 		es := make([]*Server, tt)
 		hs := make([]*httptest.Server, tt)
 		for i := 0; i < tt; i++ {
-			c := config.New()
+			c := newTestConfig()
 			if i > 0 {
 				c.Peers = []string{hs[i-1].URL}
 			}
@@ -160,7 +160,7 @@ func TestClusterConfigReload(t *testing.T) {
 		}
 
 		for k := range es {
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[k].config.DataDir
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
@@ -199,7 +199,7 @@ func TestMultiNodeKillOne(t *testing.T) {
 			es[idx].Stop()
 			hs[idx].Close()
 
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[idx].config.DataDir
 			c.Addr = hs[idx].Listener.Addr().String()
 			id := es[idx].id
@@ -240,7 +240,7 @@ func TestMultiNodeKillAllAndRecovery(t *testing.T) {
 		}
 
 		for k := range es {
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[k].config.DataDir
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
