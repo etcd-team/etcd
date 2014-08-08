@@ -35,30 +35,28 @@ import (
 )
 
 func TestMultipleNodes(t *testing.T) {
+	afterTest(t)
 	tests := []int{1, 3, 5, 9, 11}
 
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestMultipleTLSNodes(t *testing.T) {
+	afterTest(t)
 	tests := []int{1, 3, 5}
 
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, true)
-		waitCluster(t, es)
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestV2Redirect(t *testing.T) {
+	defer afterTest(t)
 	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
 	u := hs[1].URL
 	ru := fmt.Sprintf("%s%s", hs[0].URL, "/v2/keys/foo")
 	tc := NewTestClient()
@@ -80,25 +78,27 @@ func TestV2Redirect(t *testing.T) {
 
 	resp.Body.Close()
 	destoryCluster(t, es, hs)
-	afterTest(t)
 }
 
 func TestAdd(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{3, 4, 5, 6}
 
 	for _, tt := range tests {
 		es := make([]*Server, tt)
 		hs := make([]*httptest.Server, tt)
 		for i := 0; i < tt; i++ {
-			c := config.New()
+			c := newTestConfig()
 			if i > 0 {
 				c.Peers = []string{hs[0].URL}
 			}
-			es[i], hs[i] = initTestServer(c, int64(i), false)
+			es[i], hs[i] = newUnstartedTestServer(c, int64(i), false)
 		}
 
 		go es[0].Run()
-		waitMode(participantMode, es[0])
+		if err := waitMode(participantMode, es[0], nil); err != nil {
+			t.Fatal(err)
+		}
 
 		for i := 1; i < tt; i++ {
 			id := int64(i)
@@ -123,7 +123,9 @@ func TestAdd(t *testing.T) {
 				}
 			}
 			go es[i].Run()
-			waitMode(participantMode, es[i])
+			if err := waitMode(participantMode, es[i], nil); err != nil {
+				t.Fatal(err)
+			}
 
 			for j := 0; j <= i; j++ {
 				p := fmt.Sprintf("%s/%d", v2machineKVPrefix, id)
@@ -138,15 +140,14 @@ func TestAdd(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestRemove(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{3, 4, 5, 6}
 
 	for k, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		lead, _ := waitLeader(es)
 		config := config.NewClusterConfig()
@@ -187,26 +188,24 @@ func TestRemove(t *testing.T) {
 				default:
 					t.Fatal(err)
 				}
-
 			}
 
-			waitMode(standbyMode, es[i])
+			if err := waitMode(standbyMode, es[i], nil); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
-	// ensure that no goroutines are running
-	TestGoroutinesRunning(t)
 }
 
 func TestBecomeStandby(t *testing.T) {
+	defer afterTest(t)
 	size := 5
 	round := 1
 
 	for j := 0; j < round; j++ {
 		es, hs := buildCluster(size, false)
-		waitCluster(t, es)
 
 		lead, _ := waitActiveLeader(es)
 		i := rand.Intn(size)
@@ -236,7 +235,9 @@ func TestBecomeStandby(t *testing.T) {
 			}
 		}
 
-		waitMode(standbyMode, es[i])
+		if err := waitMode(standbyMode, es[i], nil); err != nil {
+			t.Fatal(err)
+		}
 
 		var leader int64
 		for k := 0; k < 3; k++ {
@@ -252,10 +253,10 @@ func TestBecomeStandby(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestReleaseVersion(t *testing.T) {
+	defer afterTest(t)
 	es, hs := buildCluster(1, false)
 
 	resp, err := http.Get(hs[0].URL + "/version")
@@ -282,6 +283,7 @@ func TestReleaseVersion(t *testing.T) {
 }
 
 func TestVersionCheck(t *testing.T) {
+	defer afterTest(t)
 	es, hs := buildCluster(1, false)
 	u := hs[0].URL
 
@@ -315,14 +317,11 @@ func TestVersionCheck(t *testing.T) {
 }
 
 func TestSingleNodeRecovery(t *testing.T) {
+	defer afterTest(t)
 	id := genId()
-	dataDir, err := ioutil.TempDir(os.TempDir(), "etcd")
-	if err != nil {
-		panic(err)
-	}
-	c := config.New()
-	c.DataDir = dataDir
-	e, h, _ := buildServer(t, c, id)
+	c := newTestConfig()
+	e, h := newUnstartedTestServer(c, id, false)
+	startCluster([]*Server{e})
 	key := "/foo"
 
 	ev, err := e.p.Set(key, false, "bar", time.Now().Add(time.Second*100))
@@ -348,9 +347,10 @@ func TestSingleNodeRecovery(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	c = config.New()
-	c.DataDir = dataDir
-	e, h, _ = buildServer(t, c, id)
+	nc := newTestConfig()
+	nc.DataDir = c.DataDir
+	e, h = newUnstartedTestServer(nc, id, false)
+	startCluster([]*Server{e})
 
 	waitLeader([]*Server{e})
 	w, err = e.p.Watch(key, false, false, ev.Index())
@@ -370,6 +370,7 @@ func TestSingleNodeRecovery(t *testing.T) {
 }
 
 func TestTakingSnapshot(t *testing.T) {
+	defer afterTest(t)
 	es, hs := buildCluster(1, false)
 	for i := 0; i < defaultCompact; i++ {
 		es[0].p.Set("/foo", false, "bar", store.Permanent)
@@ -388,6 +389,7 @@ func TestTakingSnapshot(t *testing.T) {
 }
 
 func TestRestoreSnapshotFromLeader(t *testing.T) {
+	defer afterTest(t)
 	es, hs := buildCluster(1, false)
 	// let leader do snapshot
 	for i := 0; i < defaultCompact; i++ {
@@ -395,11 +397,13 @@ func TestRestoreSnapshotFromLeader(t *testing.T) {
 	}
 
 	// create one to join the cluster
-	c := config.New()
+	c := newTestConfig()
 	c.Peers = []string{hs[0].URL}
-	e, h := initTestServer(c, 1, false)
+	e, h := newUnstartedTestServer(c, 1, false)
 	go e.Run()
-	waitMode(participantMode, e)
+	if err := waitMode(participantMode, e, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	// check new proposal could be submitted
 	if _, err := es[0].p.Set("/foo", false, "bar", store.Permanent); err != nil {
@@ -445,15 +449,26 @@ func buildCluster(number int, tls bool) ([]*Server, []*httptest.Server) {
 	var seed string
 
 	for i := range es {
-		c := config.New()
+		c := newTestConfig()
 		if seed != "" {
 			c.Peers = []string{seed}
 		}
-		es[i], hs[i] = initTestServer(c, int64(i), tls)
+		es[i], hs[i] = newUnstartedTestServer(c, int64(i), tls)
 
 		if i == bootstrapper {
 			seed = hs[i].URL
-		} else {
+		}
+	}
+	if err := startCluster(es); err != nil {
+		panic(err)
+	}
+	return es, hs
+}
+
+func startCluster(es []*Server) error {
+	errc := make(chan error)
+	for i := range es {
+		if i != 0 {
 			// wait for the previous configuration change to be committed
 			// or this configuration request might be dropped
 			w, err := es[0].p.Watch(v2machineKVPrefix, true, false, uint64(i))
@@ -462,27 +477,24 @@ func buildCluster(number int, tls bool) ([]*Server, []*httptest.Server) {
 			}
 			<-w.EventChan
 		}
-		go es[i].Run()
-		waitMode(participantMode, es[i])
+		go func(i int) {
+			err := es[i].Run()
+			if err != nil {
+				errc <- err
+			}
+		}(i)
+		if err := waitMode(participantMode, es[i], errc); err != nil {
+			return err
+		}
 	}
-	return es, hs
+	return waitCluster(es)
 }
 
-func initTestServer(c *config.Config, id int64, tls bool) (e *Server, h *httptest.Server) {
-	if c.DataDir == "" {
-		n, err := ioutil.TempDir(os.TempDir(), "etcd")
-		if err != nil {
-			panic(err)
-		}
-		c.DataDir = n
-	}
-	addr := c.Addr
-
-	srv, err := New(c)
+func newUnstartedTestServer(c *config.Config, id int64, tls bool) (*Server, *httptest.Server) {
+	e, err := New(c)
 	if err != nil {
 		panic(err)
 	}
-	e = srv
 	e.setId(id)
 	e.SetTick(time.Millisecond * 5)
 
@@ -492,39 +504,36 @@ func initTestServer(c *config.Config, id int64, tls bool) (e *Server, h *httptes
 	m.Handle("/raft/", e.RaftHandler())
 	m.Handle("/v2/admin/", e.RaftHandler())
 
-	if addr == "127.0.0.1:4001" {
-		if tls {
-			h = httptest.NewTLSServer(m)
-		} else {
-			h = httptest.NewServer(m)
-		}
-	} else {
-		var l net.Listener
-		var err error
-		for {
-			l, err = net.Listen("tcp", addr)
-			if err == nil {
-				break
-			}
-			if !strings.Contains(err.Error(), "address already in use") {
-				panic(err)
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-		h = &httptest.Server{
-			Listener: l,
-			Config:   &http.Server{Handler: m},
-		}
-		if tls {
-			h.StartTLS()
-		} else {
-			h.Start()
-		}
+	u, err := url.Parse(c.Addr)
+	if err != nil {
+		panic(err)
 	}
+
+	var l net.Listener
+	for {
+		l, err = net.Listen("tcp", u.Host)
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "address already in use") {
+			panic(err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	h := &httptest.Server{
+		Listener: l,
+		Config:   &http.Server{Handler: m},
+	}
+	if tls {
+		h.StartTLS()
+	} else {
+		h.Start()
+	}
+
 	e.raftPubAddr = h.URL
 	e.pubAddr = h.URL
 
-	return
+	return e, h
 }
 
 func destoryCluster(t *testing.T, es []*Server, hs []*httptest.Server) {
@@ -552,7 +561,7 @@ func destroyServer(t *testing.T, e *Server, h *httptest.Server) {
 	}
 }
 
-func waitCluster(t *testing.T, es []*Server) {
+func waitCluster(es []*Server) error {
 	n := len(es)
 	for _, e := range es {
 		for k := 0; k < n; k++ {
@@ -567,37 +576,35 @@ func waitCluster(t *testing.T, es []*Server) {
 	clusterId := es[0].p.node.ClusterId()
 	for i, e := range es {
 		if e.p.node.ClusterId() != clusterId {
-			t.Errorf("#%d: clusterId = %x, want %x", i, e.p.node.ClusterId(), clusterId)
+			panic(i)
+			//("#%d: clusterId = %x, want %x", i, e.p.node.ClusterId(), clusterId)
 		}
 	}
+	return nil
 }
 
-func waitMode(mode int64, e *Server) {
-	for {
+func waitMode(mode int64, e *Server, errC chan error) error {
+	for i := 0; i < 5; i++ {
 		if e.mode.Get() == mode {
-			return
+			return nil
+		}
+		select {
+		case e := <-errC:
+			return e
+		default:
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	return fmt.Errorf("waitMode timeout 50ms")
 }
 
-// checkParticipant checks the i-th server works well as participant.
-func checkParticipant(i int, es []*Server) error {
-	lead, _ := waitActiveLeader(es)
-	key := fmt.Sprintf("/%d", rand.Int31())
-	ev, err := es[lead].p.Set(key, false, "bar", store.Permanent)
+func newTestConfig() *config.Config {
+	c := config.New()
+	c.Addr = "127.0.0.1:0"
+	n, err := ioutil.TempDir(os.TempDir(), "etcd")
 	if err != nil {
-		return err
+		panic(err)
 	}
-
-	w, err := es[i].p.Watch(key, false, false, ev.Index())
-	if err != nil {
-		return err
-	}
-	select {
-	case <-w.EventChan:
-	case <-time.After(8 * defaultHeartbeat * es[i].tickDuration):
-		return fmt.Errorf("watch timeout")
-	}
-	return nil
+	c.DataDir = n
+	return c
 }

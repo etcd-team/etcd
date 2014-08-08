@@ -32,11 +32,11 @@ import (
 )
 
 func TestKillLeader(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{3, 5, 9}
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		var totalTime time.Duration
 		for j := 0; j < tt; j++ {
@@ -54,11 +54,12 @@ func TestKillLeader(t *testing.T) {
 			avgTime := totalTime / (time.Duration)(i+1)
 			fmt.Println("Total time:", totalTime, "; Avg time:", avgTime)
 
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[lead].config.DataDir
 			c.Addr = hs[lead].Listener.Addr().String()
 			id := es[lead].id
-			e, h, err := buildServer(t, c, id)
+			e, h := newUnstartedTestServer(c, id, false)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatalf("#%d.%d: %v", i, j, err)
 			}
@@ -68,15 +69,14 @@ func TestKillLeader(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestKillRandom(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{3, 5, 9}
 
 	for _, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		for j := 0; j < tt; j++ {
 			waitLeader(es)
@@ -95,11 +95,12 @@ func TestKillRandom(t *testing.T) {
 			waitLeader(es)
 
 			for k := range toKill {
-				c := config.New()
+				c := newTestConfig()
 				c.DataDir = es[k].config.DataDir
 				c.Addr = hs[k].Listener.Addr().String()
 				id := es[k].id
-				e, h, err := buildServer(t, c, id)
+				e, h := newUnstartedTestServer(c, id, false)
+				err := startCluster([]*Server{e})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -110,21 +111,21 @@ func TestKillRandom(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestJoinThroughFollower(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{3, 4, 5, 6}
 
 	for _, tt := range tests {
 		es := make([]*Server, tt)
 		hs := make([]*httptest.Server, tt)
 		for i := 0; i < tt; i++ {
-			c := config.New()
+			c := newTestConfig()
 			if i > 0 {
 				c.Peers = []string{hs[i-1].URL}
 			}
-			es[i], hs[i] = initTestServer(c, int64(i), false)
+			es[i], hs[i] = newUnstartedTestServer(c, int64(i), false)
 		}
 
 		go es[0].Run()
@@ -133,19 +134,18 @@ func TestJoinThroughFollower(t *testing.T) {
 			go es[i].Run()
 			waitLeader(es[:i])
 		}
-		waitCluster(t, es)
+		waitCluster(es)
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestClusterConfigReload(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{3, 4, 5, 6}
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		lead, _ := waitLeader(es)
 		conf := config.NewClusterConfig()
@@ -161,11 +161,12 @@ func TestClusterConfigReload(t *testing.T) {
 		}
 
 		for k := range es {
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[k].config.DataDir
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
-			e, h, err := buildServer(t, c, id)
+			e, h := newUnstartedTestServer(c, id, false)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -182,15 +183,14 @@ func TestClusterConfigReload(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestMultiNodeKillOne(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{5}
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 
 		stop := make(chan bool)
 		go keepSetting(hs[0].URL, stop)
@@ -200,11 +200,12 @@ func TestMultiNodeKillOne(t *testing.T) {
 			es[idx].Stop()
 			hs[idx].Close()
 
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[idx].config.DataDir
 			c.Addr = hs[idx].Listener.Addr().String()
 			id := es[idx].id
-			e, h, err := buildServer(t, c, id)
+			e, h := newUnstartedTestServer(c, id, false)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatalf("#%d.%d: %v", i, j, err)
 			}
@@ -217,15 +218,14 @@ func TestMultiNodeKillOne(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func TestMultiNodeKillAllAndRecovery(t *testing.T) {
+	defer afterTest(t)
 	tests := []int{5}
 
 	for i, tt := range tests {
 		es, hs := buildCluster(tt, false)
-		waitCluster(t, es)
 		waitLeader(es)
 
 		c := etcd.NewClient([]string{hs[0].URL})
@@ -241,11 +241,12 @@ func TestMultiNodeKillAllAndRecovery(t *testing.T) {
 		}
 
 		for k := range es {
-			c := config.New()
+			c := newTestConfig()
 			c.DataDir = es[k].config.DataDir
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
-			e, h, err := buildServer(t, c, id)
+			e, h := newUnstartedTestServer(c, id, false)
+			err := startCluster([]*Server{e})
 			if err != nil {
 				t.Fatalf("#%d.%d: %v", i, k, err)
 			}
@@ -264,7 +265,6 @@ func TestMultiNodeKillAllAndRecovery(t *testing.T) {
 
 		destoryCluster(t, es, hs)
 	}
-	afterTest(t)
 }
 
 func BenchmarkEndToEndSet(b *testing.B) {
@@ -279,63 +279,6 @@ func BenchmarkEndToEndSet(b *testing.B) {
 	}
 	b.StopTimer()
 	destoryCluster(nil, es, hs)
-}
-
-// TODO(yichengq): cannot handle previous msgDenial correctly now
-func TestModeSwitch(t *testing.T) {
-	t.Skip("not passed")
-	size := 5
-	round := 3
-
-	for i := 0; i < size; i++ {
-		es, hs := buildCluster(size, false)
-		waitCluster(t, es)
-
-		config := config.NewClusterConfig()
-		config.SyncInterval = 0
-		id := int64(i)
-		for j := 0; j < round; j++ {
-			lead, _ := waitActiveLeader(es)
-			// cluster only demotes follower
-			if lead == id {
-				continue
-			}
-
-			config.ActiveSize = size - 1
-			if err := es[lead].p.setClusterConfig(config); err != nil {
-				t.Fatalf("#%d: setClusterConfig err = %v", i, err)
-			}
-			if err := es[lead].p.remove(id); err != nil {
-				t.Fatalf("#%d: remove err = %v", i, err)
-			}
-
-			waitMode(standbyMode, es[i])
-
-			for k := 0; k < 4; k++ {
-				if es[i].s.leader != noneId {
-					break
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
-			if g := es[i].s.leader; g != lead {
-				t.Errorf("#%d: lead = %d, want %d", i, g, lead)
-			}
-
-			config.ActiveSize = size
-			if err := es[lead].p.setClusterConfig(config); err != nil {
-				t.Fatalf("#%d: setClusterConfig err = %v", i, err)
-			}
-
-			waitMode(participantMode, es[i])
-
-			if err := checkParticipant(i, es); err != nil {
-				t.Errorf("#%d: check alive err = %v", i, err)
-			}
-		}
-
-		destoryCluster(t, es, hs)
-	}
-	afterTest(t)
 }
 
 // Sending set commands

@@ -24,9 +24,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
-
-	"github.com/coreos/etcd/config"
 )
 
 const (
@@ -55,9 +52,10 @@ func TestBadDiscoveryService(t *testing.T) {
 	g := garbageHandler{t: t}
 	ts := httptest.NewServer(&g)
 
-	c := config.New()
+	c := newTestConfig()
 	c.Discovery = ts.URL + "/v2/keys/_etcd/registry/1"
-	_, _, err := buildServer(t, c, bootstrapId)
+	e, h := newUnstartedTestServer(c, bootstrapId, false)
+	err := startCluster([]*Server{e})
 	w := `discovery service error`
 	if err == nil || !strings.HasPrefix(err.Error(), w) {
 		t.Errorf("err = %v, want %s prefix", err, w)
@@ -69,6 +67,8 @@ func TestBadDiscoveryService(t *testing.T) {
 		t.Fatal("Discovery server never called")
 	}
 	ts.Close()
+
+	destroyServer(t, e, h)
 	afterTest(t)
 }
 
@@ -77,43 +77,47 @@ func TestBadDiscoveryServiceWithAdvisedPeers(t *testing.T) {
 	ts := httptest.NewServer(&g)
 
 	es, hs := buildCluster(1, false)
-	waitCluster(t, es)
 
-	c := config.New()
+	c := newTestConfig()
 	c.Discovery = ts.URL + "/v2/keys/_etcd/registry/1"
 	c.Peers = []string{hs[0].URL}
-	_, _, err := buildServer(t, c, bootstrapId)
+	e, h := newUnstartedTestServer(c, bootstrapId, false)
+	err := startCluster([]*Server{e})
 	w := `discovery service error`
 	if err == nil || !strings.HasPrefix(err.Error(), w) {
 		t.Errorf("err = %v, want %s prefix", err, w)
 	}
 
 	destoryCluster(t, es, hs)
+	destroyServer(t, e, h)
 	ts.Close()
 	afterTest(t)
 }
 
 func TestBootstrapByEmptyPeers(t *testing.T) {
-	c := config.New()
+	c := newTestConfig()
 	id := genId()
-	e, h, err := buildServer(t, c, id)
+	e, h := newUnstartedTestServer(c, id, false)
+	err := startCluster([]*Server{e})
 
 	if err != nil {
 		t.Error(err)
 	}
 	if e.p.node.Leader() != id {
-		t.Error("leader = %x, want %x", e.p.node.Leader(), id)
+		t.Errorf("leader = %x, want %x", e.p.node.Leader(), id)
 	}
 	destroyServer(t, e, h)
 	afterTest(t)
 }
 
 func TestBootstrapByDiscoveryService(t *testing.T) {
-	de, dh, _ := buildServer(t, config.New(), genId())
+	de, dh := newUnstartedTestServer(newTestConfig(), genId(), false)
+	err := startCluster([]*Server{de})
 
-	c := config.New()
+	c := newTestConfig()
 	c.Discovery = dh.URL + "/v2/keys/_etcd/registry/1"
-	e, h, err := buildServer(t, c, bootstrapId)
+	e, h := newUnstartedTestServer(c, bootstrapId, false)
+	err = startCluster([]*Server{e})
 	if err != nil {
 		t.Fatalf("build server err = %v, want nil", err)
 	}
@@ -125,11 +129,11 @@ func TestBootstrapByDiscoveryService(t *testing.T) {
 
 func TestRunByAdvisedPeers(t *testing.T) {
 	es, hs := buildCluster(1, false)
-	waitCluster(t, es)
 
-	c := config.New()
+	c := newTestConfig()
 	c.Peers = []string{hs[0].URL}
-	e, h, err := buildServer(t, c, bootstrapId)
+	e, h := newUnstartedTestServer(c, bootstrapId, false)
+	err := startCluster([]*Server{e})
 	if err != nil {
 		t.Fatalf("build server err = %v, want nil", err)
 	}
@@ -144,7 +148,8 @@ func TestRunByAdvisedPeers(t *testing.T) {
 }
 
 func TestRunByDiscoveryService(t *testing.T) {
-	de, dh, _ := buildServer(t, config.New(), genId())
+	de, dh := newUnstartedTestServer(newTestConfig(), genId(), false)
+	err := startCluster([]*Server{de})
 
 	tc := NewTestClient()
 	v := url.Values{}
@@ -162,9 +167,10 @@ func TestRunByDiscoveryService(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	c := config.New()
+	c := newTestConfig()
 	c.Discovery = dh.URL + "/v2/keys/_etcd/registry/1"
-	e, h, err := buildServer(t, c, bootstrapId)
+	e, h := newUnstartedTestServer(c, bootstrapId, false)
+	err = startCluster([]*Server{e})
 	if err != nil {
 		t.Fatalf("build server err = %v, want nil", err)
 	}
@@ -180,20 +186,4 @@ func TestRunByDiscoveryService(t *testing.T) {
 
 func TestRunByDataDir(t *testing.T) {
 	TestSingleNodeRecovery(t)
-}
-
-func buildServer(t *testing.T, c *config.Config, id int64) (e *Server, h *httptest.Server, err error) {
-	e, h = initTestServer(c, id, false)
-	go func() { err = e.Run() }()
-	for {
-		if e.mode.Get() == participantMode {
-			break
-		}
-		if err != nil {
-			destroyServer(t, e, h)
-			return nil, nil, err
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return e, h, nil
 }
