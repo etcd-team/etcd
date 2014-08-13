@@ -45,7 +45,7 @@ func New(id int64, heartbeat, election tick) *Node {
 		heartbeat:    heartbeat,
 		election:     election,
 		electionRand: election + tick(rand.Int31())%election,
-		sm:           newStateMachine(id, []int64{id}),
+		sm:           newStateMachine(id, []int64{}),
 		rmNodes:      make(map[int64]struct{}),
 	}
 
@@ -97,7 +97,12 @@ func (n *Node) propose(t int64, data []byte) {
 	n.Step(Message{From: n.sm.id, ClusterId: n.ClusterId(), Type: msgProp, Entries: []Entry{{Type: t, Data: data}}})
 }
 
-func (n *Node) Campaign() { n.Step(Message{From: n.sm.id, ClusterId: n.ClusterId(), Type: msgHup}) }
+func (n *Node) Campaign(addr string, context []byte) {
+	id := n.sm.id
+	n.sm = newStateMachine(id, []int64{id})
+	n.Step(Message{From: id, ClusterId: n.ClusterId(), Type: msgHup})
+	n.Add(id, addr, context)
+}
 
 func (n *Node) InitCluster(clusterId int64) {
 	d := make([]byte, 10)
