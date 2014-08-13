@@ -175,7 +175,7 @@ func (c *v2client) readErrorBody(body io.ReadCloser) *etcdErr.Error {
 		str := strings.TrimSpace(string(b))
 		return etcdErr.NewError(etcdErr.EcodeClientInternal, str, 0)
 	}
-	return nil
+	return uerr
 }
 
 func (c *v2client) readJSONBody(body io.ReadCloser, val interface{}) *etcdErr.Error {

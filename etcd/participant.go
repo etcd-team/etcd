@@ -60,6 +60,7 @@ var (
 	tmpErr      = fmt.Errorf("try again")
 	stopErr     = fmt.Errorf("server is stopped")
 	raftStopErr = fmt.Errorf("raft is stopped")
+	fullErr     = fmt.Errorf("cluster is full")
 )
 
 type participant struct {
@@ -172,7 +173,8 @@ func (p *participant) run(stop chan struct{}) {
 		} else {
 			log.Printf("id=%x participant.run action=join seeds=\"%v\"\n", p.id, seeds)
 			if err := p.join(); err != nil {
-				log.Fatalf("id=%x participant.join err=%q", p.id, err)
+				log.Printf("id=%x participant.run joinErr=%q", p.id, err)
+				return
 			}
 		}
 	}
@@ -264,6 +266,11 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 		log.Printf("id=%x participant.add getErr=\"%v\"\n", p.id, err)
 		return err
 	}
+	size := len(p.node.Nodes())
+	if size >= p.clusterConfig().ActiveSize {
+		log.Printf("id=%x participant.add addNodeErr=%q", p.id, fullErr)
+		return etcdErr.NewError(etcdErr.EcodeNoMorePeer, "", uint64(p.node.Applied()))
+	}
 
 	w, err := p.Watch(pp, true, false, 0)
 	if err != nil {
@@ -272,7 +279,7 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 	}
 
 	select {
-	case p.addNodeC <- raft.Config{NodeId: id, Addr: raftPubAddr, Context: []byte(pubAddr)}:
+	case p.addNodeC <- raft.Config{NodeId: id, Addr: raftPubAddr, ExpectedSize: size + 1, Context: []byte(pubAddr)}:
 	default:
 		w.Remove()
 		log.Printf("id=%x participant.add proposeErr=\"unable to send out addNode proposal\"\n", p.id)
@@ -281,11 +288,11 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 
 	select {
 	case v := <-w.EventChan:
-		if v.Action == store.Set {
-			return nil
+		if v.Action != store.Set {
+			log.Printf("id=%x participant.add watchErr=\"unexpected action\" action=%s", p.id, v.Action)
+			return tmpErr
 		}
-		log.Printf("id=%x participant.add watchErr=\"unexpected action\" action=%s\n", p.id, v.Action)
-		return tmpErr
+		return nil
 	case <-time.After(6 * defaultHeartbeat * p.tickDuration):
 		w.Remove()
 		log.Printf("id=%x participant.add watchErr=timeout\n", p.id)
@@ -427,10 +434,13 @@ func (p *participant) join() error {
 	max := p.cfg.MaxRetryAttempts
 	for attempt := 0; ; attempt++ {
 		for seed := range p.peerHub.getSeeds() {
-			if err := p.client.AddMachine(seed, fmt.Sprint(p.id), info); err == nil {
+			err := p.client.AddMachine(seed, fmt.Sprint(p.id), info)
+			if err == nil {
 				return nil
-			} else {
-				log.Printf("id=%x participant.join addMachineErr=\"%v\"\n", p.id, err)
+			}
+			log.Printf("id=%x participant.join addMachineErr=%q", p.id, err)
+			if err.ErrorCode == etcdErr.EcodeNoMorePeer {
+				return fullErr
 			}
 		}
 		if attempt == max {

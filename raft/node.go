@@ -17,9 +17,10 @@ type Interface interface {
 type tick int64
 
 type Config struct {
-	NodeId  int64
-	Addr    string
-	Context []byte
+	NodeId       int64
+	Addr         string
+	ExpectedSize int
+	Context      []byte
 }
 
 type Node struct {
@@ -178,6 +179,10 @@ func (n *Node) Next() []Entry {
 			if err := json.Unmarshal(ents[i].Data, c); err != nil {
 				log.Printf("raft: err=%q", err)
 				continue
+			}
+			if c.ExpectedSize > 0 && len(n.sm.ins)+1 != c.ExpectedSize {
+				ents[i].becomeNoop()
+				break
 			}
 			n.sm.addNode(c.NodeId)
 			delete(n.rmNodes, c.NodeId)

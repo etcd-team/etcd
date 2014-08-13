@@ -18,6 +18,11 @@ func (e *Entry) isConfig() bool {
 	return e.Type == AddNode || e.Type == RemoveNode
 }
 
+func (e *Entry) becomeNoop() {
+	e.Type = Normal
+	e.Data = nil
+}
+
 type raftLog struct {
 	ents             []Entry
 	unstable         int64
