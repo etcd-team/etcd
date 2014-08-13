@@ -32,8 +32,9 @@ type Node struct {
 	heartbeat    tick
 
 	// TODO: it needs garbage collection later
-	rmNodes map[int64]struct{}
-	removed bool
+	rmNodes       map[int64]struct{}
+	removed       bool
+	bootstrapping bool
 }
 
 func New(id int64, heartbeat, election tick) *Node {
@@ -102,6 +103,7 @@ func (n *Node) Campaign() {
 	id := n.sm.id
 	n.sm = newStateMachine(id, []int64{id})
 	n.Step(Message{From: id, ClusterId: n.ClusterId(), Type: msgHup})
+	n.bootstrapping = true
 }
 
 func (n *Node) InitCluster(clusterId int64) {
@@ -181,8 +183,21 @@ func (n *Node) Next() []Entry {
 				continue
 			}
 			if c.ExpectedSize > 0 && len(n.sm.ins)+1 != c.ExpectedSize {
+				log.Printf("raft.Next.addNode id=%x err=unmatchExpectedSize", c.NodeId)
 				ents[i].becomeNoop()
 				break
+			}
+			if _, ok := n.sm.ins[c.NodeId]; ok {
+				if n.bootstrapping {
+					if c.NodeId != n.sm.id {
+						panic("should add bootstrapper as the first step")
+					}
+					n.bootstrapping = false
+				} else {
+					log.Printf("raft.Next.addNode id=%x err=existed", c.NodeId)
+					ents[i].becomeNoop()
+					break
+				}
 			}
 			n.sm.addNode(c.NodeId)
 			delete(n.rmNodes, c.NodeId)
@@ -193,6 +208,12 @@ func (n *Node) Next() []Entry {
 				continue
 			}
 			if c.ExpectedSize > 0 && len(n.sm.ins)-1 != c.ExpectedSize {
+				log.Printf("raft.Next.removeNode id=%x err=unmatchExpectedSize", c.NodeId)
+				ents[i].becomeNoop()
+				break
+			}
+			if _, ok := n.sm.ins[c.NodeId]; !ok {
+				log.Printf("raft.Next.removeNode id=%x err=notExisted", c.NodeId)
 				ents[i].becomeNoop()
 				break
 			}
