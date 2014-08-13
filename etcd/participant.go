@@ -155,9 +155,8 @@ func (p *participant) run(stop chan struct{}) {
 		seeds := p.peerHub.getSeeds()
 		if len(seeds) == 0 {
 			log.Printf("id=%x participant.run action=bootstrap\n", p.id)
-			p.node.Campaign()
+			p.node.Campaign(p.raftPubAddr, []byte(p.pubAddr))
 			p.node.InitCluster(genId())
-			p.node.Add(p.id, p.raftPubAddr, []byte(p.pubAddr))
 			p.apply(p.node.Next())
 		} else {
 			log.Printf("id=%x participant.run action=join seeds=\"%v\"\n", p.id, seeds)

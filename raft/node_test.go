@@ -217,8 +217,7 @@ func TestRecover(t *testing.T) {
 }
 
 func dictate(n *Node) *Node {
-	n.Step(Message{From: n.Id(), Type: msgHup})
+	n.Campaign("", nil)
 	n.InitCluster(0xBEEF)
-	n.Add(n.Id(), "", nil)
 	return n
 }
