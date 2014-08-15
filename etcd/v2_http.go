@@ -17,11 +17,13 @@ limitations under the License.
 package etcd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	etcdErr "github.com/coreos/etcd/error"
 )
@@ -72,6 +74,30 @@ func (p *participant) serveLeader(w http.ResponseWriter, r *http.Request) error 
 		return nil
 	}
 	return fmt.Errorf("no leader")
+}
+
+func (p *participant) serveSelfStats(w http.ResponseWriter, req *http.Request) error {
+	p.serverStats.LeaderInfo.Uptime = time.Now().Sub(p.serverStats.LeaderInfo.StartTime).String()
+
+	if p.node.IsLeader() {
+		p.serverStats.LeaderInfo.Name = fmt.Sprint(p.id)
+	}
+
+	queue := p.serverStats.sendRateQueue
+	p.serverStats.SendingPkgRate, p.serverStats.SendingBandwidthRate = queue.Rate()
+
+	queue = p.serverStats.recvRateQueue
+	p.serverStats.RecvingPkgRate, p.serverStats.RecvingBandwidthRate = queue.Rate()
+
+	return json.NewEncoder(w).Encode(p.serverStats)
+}
+
+func (p *participant) serveLeaderStats(w http.ResponseWriter, req *http.Request) error {
+	if !p.node.IsLeader() {
+		return p.redirect(w, req, p.node.Leader())
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(p.peerHub.followersStats)
 }
 
 func (p *participant) serveStoreStats(w http.ResponseWriter, req *http.Request) error {
