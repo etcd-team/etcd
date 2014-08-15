@@ -270,6 +270,9 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 	log.Printf("id=%x participant.add nodeId=%x raftPubAddr=%s pubAddr=%s\n", p.id, id, raftPubAddr, pubAddr)
 	pp := path.Join(v2machineKVPrefix, fmt.Sprint(id))
 
+	// The pre-checking gives caller possible hints on why it cannot join cluster.
+	// The result could be wrong in rare cases, but it will be corrected in a
+	// short time if it still has connection with the cluster.
 	_, err := p.Store.Get(pp, false, false)
 	if err == nil {
 		return nil
@@ -431,7 +434,8 @@ func (p *participant) maybeShrinkSize() {
 	}
 	log.Printf("id=%x participant.checkActiveSize size=%d expectedSize=%d", p.id, len(nodes), activeSize)
 	rmId := nodes[0]
-	if activeSize > 1 && rmId == p.id {
+	// It doesn't remove the leader to avoid extra leader change.
+	if len(nodes) > 1 && rmId == p.id {
 		rmId = nodes[1]
 	}
 	p.node.UpdateConf(raft.RemoveNode, &raft.Config{NodeId: rmId, ExpectedSize: len(nodes) - 1})
@@ -457,14 +461,14 @@ func (p *participant) join() error {
 	max := p.cfg.MaxRetryAttempts
 	for attempt := 0; ; attempt++ {
 		for seed := range p.peerHub.getSeeds() {
-			err := p.client.AddMachine(seed, fmt.Sprint(p.id), info)
-			if err == nil {
-				return nil
+			if err := p.client.AddMachine(seed, fmt.Sprint(p.id), info); err != nil {
+				log.Printf("id=%x participant.join addMachineErr=%q", p.id, err)
+				if err.ErrorCode == etcdErr.EcodeNoMorePeer {
+					return fullErr
+				}
+				continue
 			}
-			log.Printf("id=%x participant.join addMachineErr=%q", p.id, err)
-			if err.ErrorCode == etcdErr.EcodeNoMorePeer {
-				return fullErr
-			}
+			return nil
 		}
 		if attempt == max {
 			return fmt.Errorf("etcd: cannot join cluster after %d attempts", max)
