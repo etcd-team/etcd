@@ -9,44 +9,43 @@ import (
 	"os"
 	"time"
 
-	"github.com/coreos/etcd/config"
+	"github.com/coreos/etcd/conf"
 	"github.com/coreos/etcd/etcd"
-	ehttp "github.com/coreos/etcd/http"
 )
 
 func main() {
-	var config = config.New()
-	if err := config.Load(os.Args[1:]); err != nil {
+	var cfg = conf.New()
+	if err := cfg.Load(os.Args[1:]); err != nil {
 		fmt.Println(etcd.Usage() + "\n")
 		fmt.Println(err.Error(), "\n")
 		os.Exit(1)
-	} else if config.ShowVersion {
+	} else if cfg.ShowVersion {
 		fmt.Println("0.5")
 		os.Exit(0)
-	} else if config.ShowHelp {
+	} else if cfg.ShowHelp {
 		os.Exit(0)
 	}
 
-	e, err := etcd.New(config)
+	e, err := etcd.New(cfg)
 	if err != nil {
 		log.Fatal("etcd:", err)
 	}
 	go e.Run()
 
-	corsInfo, err := ehttp.NewCORSInfo(config.CorsOrigins)
+	corsInfo, err := newCORSInfo(cfg.CorsOrigins)
 	if err != nil {
 		log.Fatal("cors:", err)
 	}
 
-	readTimeout := time.Duration(config.HTTPReadTimeout) * time.Second
-	writeTimeout := time.Duration(config.HTTPWriteTimeout) * time.Second
+	readTimeout := time.Duration(cfg.HTTPReadTimeout) * time.Second
+	writeTimeout := time.Duration(cfg.HTTPWriteTimeout) * time.Second
 	go func() {
-		serve("raft", config.Peer.BindAddr, config.PeerTLSInfo(), corsInfo, e.RaftHandler(), readTimeout, writeTimeout)
+		serve("raft", cfg.Peer.BindAddr, cfg.PeerTLSInfo(), corsInfo, e.RaftHandler(), readTimeout, writeTimeout)
 	}()
-	serve("etcd", config.BindAddr, config.EtcdTLSInfo(), corsInfo, e, readTimeout, writeTimeout)
+	serve("etcd", cfg.BindAddr, cfg.EtcdTLSInfo(), corsInfo, e, readTimeout, writeTimeout)
 }
 
-func serve(who string, addr string, tinfo *config.TLSInfo, cinfo *ehttp.CORSInfo, handler http.Handler, readTimeout, writeTimeout time.Duration) {
+func serve(who string, addr string, tinfo *conf.TLSInfo, cinfo *CORSInfo, handler http.Handler, readTimeout, writeTimeout time.Duration) {
 	t, terr := tinfo.ServerConfig()
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -68,7 +67,7 @@ func serve(who string, addr string, tinfo *config.TLSInfo, cinfo *ehttp.CORSInfo
 		log.Fatal("unsupported http scheme", tinfo.Scheme())
 	}
 
-	h := &ehttp.CORSHandler{handler, cinfo}
+	h := &CORSHandler{handler, cinfo}
 	s := &http.Server{Handler: h, ReadTimeout: readTimeout, WriteTimeout: writeTimeout}
 	log.Fatal(s.Serve(l))
 }

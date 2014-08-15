@@ -1,3 +1,5 @@
+// +build ignore
+
 package tests
 
 import (
@@ -18,7 +20,7 @@ const (
 
 // Starts a new server.
 func RunServer(f func(*server.Server)) {
-	c := config.New()
+	c := cfg.New()
 
 	c.Name = testName
 	c.Addr = testClientURL

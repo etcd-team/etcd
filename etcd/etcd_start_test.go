@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/config"
+	"github.com/coreos/etcd/conf"
 )
 
 const (
@@ -55,7 +55,7 @@ func TestBadDiscoveryService(t *testing.T) {
 	g := garbageHandler{t: t}
 	ts := httptest.NewServer(&g)
 
-	c := config.New()
+	c := conf.New()
 	c.Discovery = ts.URL + "/v2/keys/_etcd/registry/1"
 	_, _, err := buildServer(t, c, bootstrapId)
 	w := `discovery service error`
@@ -79,7 +79,7 @@ func TestBadDiscoveryServiceWithAdvisedPeers(t *testing.T) {
 	es, hs := buildCluster(1, false)
 	waitCluster(t, es)
 
-	c := config.New()
+	c := conf.New()
 	c.Discovery = ts.URL + "/v2/keys/_etcd/registry/1"
 	c.Peers = []string{hs[0].URL}
 	_, _, err := buildServer(t, c, bootstrapId)
@@ -94,7 +94,7 @@ func TestBadDiscoveryServiceWithAdvisedPeers(t *testing.T) {
 }
 
 func TestBootstrapByEmptyPeers(t *testing.T) {
-	c := config.New()
+	c := conf.New()
 	id := genId()
 	e, h, err := buildServer(t, c, id)
 
@@ -109,9 +109,9 @@ func TestBootstrapByEmptyPeers(t *testing.T) {
 }
 
 func TestBootstrapByDiscoveryService(t *testing.T) {
-	de, dh, _ := buildServer(t, config.New(), genId())
+	de, dh, _ := buildServer(t, conf.New(), genId())
 
-	c := config.New()
+	c := conf.New()
 	c.Discovery = dh.URL + "/v2/keys/_etcd/registry/1"
 	e, h, err := buildServer(t, c, bootstrapId)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestRunByAdvisedPeers(t *testing.T) {
 	es, hs := buildCluster(1, false)
 	waitCluster(t, es)
 
-	c := config.New()
+	c := conf.New()
 	c.Peers = []string{hs[0].URL}
 	e, h, err := buildServer(t, c, bootstrapId)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestRunByAdvisedPeers(t *testing.T) {
 }
 
 func TestRunByDiscoveryService(t *testing.T) {
-	de, dh, _ := buildServer(t, config.New(), genId())
+	de, dh, _ := buildServer(t, cfg.New(), genId())
 
 	tc := NewTestClient()
 	v := url.Values{}
@@ -162,7 +162,7 @@ func TestRunByDiscoveryService(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	c := config.New()
+	c := cfg.New()
 	c.Discovery = dh.URL + "/v2/keys/_etcd/registry/1"
 	e, h, err := buildServer(t, c, bootstrapId)
 	if err != nil {
@@ -182,7 +182,7 @@ func TestRunByDataDir(t *testing.T) {
 	TestSingleNodeRecovery(t)
 }
 
-func buildServer(t *testing.T, c *config.Config, id int64) (e *Server, h *httptest.Server, err error) {
+func buildServer(t *testing.T, c *cfg.Config, id int64) (e *Server, h *httptest.Server, err error) {
 	e, h = initTestServer(c, id, false)
 	go func() { err = e.Run() }()
 	for {

@@ -1,6 +1,4 @@
-// +build ignore
-
-package server
+package conf
 
 import (
 	"crypto/tls"
@@ -104,5 +102,4 @@ func newCertPool(CAFile string) (*x509.CertPool, error) {
 		}
 		certPool.AddCert(cert)
 	}
-
 }

@@ -1,30 +1,4 @@
-// +build ignore
-
-package server
-
-import (
-	"time"
-)
-
-const (
-	// DefaultActiveSize is the default number of active followers allowed.
-	DefaultActiveSize = 9
-
-	// MinActiveSize is the minimum active size allowed.
-	MinActiveSize = 3
-
-	// DefaultRemoveDelay is the default elapsed time before removal.
-	DefaultRemoveDelay = float64((30 * time.Minute) / time.Second)
-
-	// MinRemoveDelay is the minimum remove delay allowed.
-	MinRemoveDelay = float64((2 * time.Second) / time.Second)
-
-	// DefaultSyncInterval is the default interval for cluster sync.
-	DefaultSyncInterval = float64((5 * time.Second) / time.Second)
-
-	// MinSyncInterval is the minimum sync interval allowed.
-	MinSyncInterval = float64((1 * time.Second) / time.Second)
-)
+package conf
 
 // ClusterConfig represents cluster-wide configuration settings.
 type ClusterConfig struct {
@@ -47,5 +21,17 @@ func NewClusterConfig() *ClusterConfig {
 		ActiveSize:   DefaultActiveSize,
 		RemoveDelay:  DefaultRemoveDelay,
 		SyncInterval: DefaultSyncInterval,
+	}
+}
+
+func (c *ClusterConfig) Sanitize() {
+	if c.ActiveSize < MinActiveSize {
+		c.ActiveSize = MinActiveSize
+	}
+	if c.RemoveDelay < MinRemoveDelay {
+		c.RemoveDelay = MinRemoveDelay
+	}
+	if c.SyncInterval < MinSyncInterval {
+		c.SyncInterval = MinSyncInterval
 	}
 }

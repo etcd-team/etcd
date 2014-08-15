@@ -1,3 +1,5 @@
+// +build ignore
+
 package server
 
 import (
@@ -83,11 +85,11 @@ func (c *Client) GetClusterConfig(url string) (*ClusterConfig, *etcdErr.Error) {
 		return nil, clientError(err)
 	}
 
-	config := new(ClusterConfig)
-	if uerr := c.parseJSONResponse(resp, config); uerr != nil {
+	cfg := new(ClusterConfig)
+	if uerr := c.parseJSONResponse(resp, cfg); uerr != nil {
 		return nil, uerr
 	}
-	return config, nil
+	return cfg, nil
 }
 
 // AddMachine adds machine to the cluster.

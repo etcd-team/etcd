@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/config"
+	"github.com/coreos/etcd/conf"
 )
 
 var (
@@ -38,7 +38,7 @@ type standby struct {
 	leader      int64
 	leaderAddr  string
 	mu          sync.RWMutex
-	clusterConf *config.ClusterConfig
+	clusterConf *conf.ClusterConfig
 
 	*http.ServeMux
 }
@@ -50,7 +50,7 @@ func newStandby(client *v2client, peerHub *peerHub) *standby {
 
 		leader:      noneId,
 		leaderAddr:  "",
-		clusterConf: config.NewClusterConfig(),
+		clusterConf: conf.NewClusterConfig(),
 
 		ServeMux: http.NewServeMux(),
 	}
@@ -115,7 +115,7 @@ func (s *standby) syncCluster(nodes map[string]bool) (map[string]bool, error) {
 		if err != nil {
 			continue
 		}
-		config, err := s.client.GetClusterConfig(node)
+		cfg, err := s.client.GetClusterConfig(node)
 		if err != nil {
 			continue
 		}
@@ -130,7 +130,7 @@ func (s *standby) syncCluster(nodes map[string]bool) (map[string]bool, error) {
 				s.setLeaderInfo(id, machine.PeerURL)
 			}
 		}
-		s.clusterConf = config
+		s.clusterConf = cfg
 		return nn, nil
 	}
 	return nil, fmt.Errorf("unreachable cluster")

@@ -29,7 +29,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/coreos/etcd/config"
+	"github.com/coreos/etcd/conf"
 	etcdErr "github.com/coreos/etcd/error"
 )
 
@@ -122,7 +122,7 @@ func (c *v2client) GetMachines(url string) ([]*machineMessage, *etcdErr.Error) {
 	return *msgs, nil
 }
 
-func (c *v2client) GetClusterConfig(url string) (*config.ClusterConfig, *etcdErr.Error) {
+func (c *v2client) GetClusterConfig(url string) (*conf.ClusterConfig, *etcdErr.Error) {
 	if c.runOne() == false {
 		return nil, clientError(errors.New("v2_client is stopped"))
 	}
@@ -136,11 +136,11 @@ func (c *v2client) GetClusterConfig(url string) (*config.ClusterConfig, *etcdErr
 		return nil, c.readErrorBody(resp.Body)
 	}
 
-	config := new(config.ClusterConfig)
-	if uerr := c.readJSONBody(resp.Body, config); uerr != nil {
+	cfg := new(conf.ClusterConfig)
+	if uerr := c.readJSONBody(resp.Body, cfg); uerr != nil {
 		return nil, uerr
 	}
-	return config, nil
+	return cfg, nil
 }
 
 // AddMachine adds machine to the cluster.

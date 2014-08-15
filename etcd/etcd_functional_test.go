@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/config"
+	"github.com/coreos/etcd/conf"
 	"github.com/coreos/etcd/store"
 
 	"github.com/coreos/etcd/third_party/github.com/coreos/go-etcd/etcd"
@@ -54,8 +54,8 @@ func TestKillLeader(t *testing.T) {
 			avgTime := totalTime / (time.Duration)(i+1)
 			fmt.Println("Total time:", totalTime, "; Avg time:", avgTime)
 
-			c := config.New()
-			c.DataDir = es[lead].config.DataDir
+			c := conf.New()
+			c.DataDir = es[lead].cfg.DataDir
 			c.Addr = hs[lead].Listener.Addr().String()
 			id := es[lead].id
 			e, h, err := buildServer(t, c, id)
@@ -95,8 +95,8 @@ func TestKillRandom(t *testing.T) {
 			waitLeader(es)
 
 			for k := range toKill {
-				c := config.New()
-				c.DataDir = es[k].config.DataDir
+				c := conf.New()
+				c.DataDir = es[k].cfg.DataDir
 				c.Addr = hs[k].Listener.Addr().String()
 				id := es[k].id
 				e, h, err := buildServer(t, c, id)
@@ -120,7 +120,7 @@ func TestJoinThroughFollower(t *testing.T) {
 		es := make([]*Server, tt)
 		hs := make([]*httptest.Server, tt)
 		for i := 0; i < tt; i++ {
-			c := config.New()
+			c := conf.New()
 			if i > 0 {
 				c.Peers = []string{hs[i-1].URL}
 			}
@@ -148,7 +148,7 @@ func TestClusterConfigReload(t *testing.T) {
 		waitCluster(t, es)
 
 		lead, _ := waitLeader(es)
-		conf := config.NewClusterConfig()
+		conf := conf.NewClusterConfig()
 		conf.ActiveSize = 15
 		conf.RemoveDelay = 60
 		if err := es[lead].p.setClusterConfig(conf); err != nil {
@@ -161,8 +161,8 @@ func TestClusterConfigReload(t *testing.T) {
 		}
 
 		for k := range es {
-			c := config.New()
-			c.DataDir = es[k].config.DataDir
+			c := conf.New()
+			c.DataDir = es[k].cfg.DataDir
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
 			e, h, err := buildServer(t, c, id)
@@ -200,8 +200,8 @@ func TestMultiNodeKillOne(t *testing.T) {
 			es[idx].Stop()
 			hs[idx].Close()
 
-			c := config.New()
-			c.DataDir = es[idx].config.DataDir
+			c := conf.New()
+			c.DataDir = es[idx].cfg.DataDir
 			c.Addr = hs[idx].Listener.Addr().String()
 			id := es[idx].id
 			e, h, err := buildServer(t, c, id)
@@ -241,8 +241,8 @@ func TestMultiNodeKillAllAndRecovery(t *testing.T) {
 		}
 
 		for k := range es {
-			c := config.New()
-			c.DataDir = es[k].config.DataDir
+			c := conf.New()
+			c.DataDir = es[k].cfg.DataDir
 			c.Addr = hs[k].Listener.Addr().String()
 			id := es[k].id
 			e, h, err := buildServer(t, c, id)
@@ -291,8 +291,8 @@ func TestModeSwitch(t *testing.T) {
 		es, hs := buildCluster(size, false)
 		waitCluster(t, es)
 
-		config := config.NewClusterConfig()
-		config.SyncInterval = 0
+		cfg := conf.NewClusterConfig()
+		cfg.SyncInterval = 0
 		id := int64(i)
 		for j := 0; j < round; j++ {
 			lead, _ := waitActiveLeader(es)
@@ -301,8 +301,8 @@ func TestModeSwitch(t *testing.T) {
 				continue
 			}
 
-			config.ActiveSize = size - 1
-			if err := es[lead].p.setClusterConfig(config); err != nil {
+			cfg.ActiveSize = size - 1
+			if err := es[lead].p.setClusterConfig(cfg); err != nil {
 				t.Fatalf("#%d: setClusterConfig err = %v", i, err)
 			}
 			if err := es[lead].p.remove(id); err != nil {
@@ -321,8 +321,8 @@ func TestModeSwitch(t *testing.T) {
 				t.Errorf("#%d: lead = %d, want %d", i, g, lead)
 			}
 
-			config.ActiveSize = size
-			if err := es[lead].p.setClusterConfig(config); err != nil {
+			cfg.ActiveSize = size
+			if err := es[lead].p.setClusterConfig(cfg); err != nil {
 				t.Fatalf("#%d: setClusterConfig err = %v", i, err)
 			}
 
