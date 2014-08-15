@@ -32,16 +32,16 @@ import (
 )
 
 func TestMachinesEndPoint(t *testing.T) {
-	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
+	cl := &testCluster{Size: 3}
+	cl.Start()
 
-	w := make([]string, len(hs))
-	for i := range hs {
-		w[i] = hs[i].URL
+	w := make([]string, cl.Size)
+	for i := 0; i < cl.Size; i++ {
+		w[i] = cl.URL(i)
 	}
 
-	for i := range hs {
-		r, err := http.Get(hs[i].URL + v2machinePrefix)
+	for i := 0; i < cl.Size; i++ {
+		r, err := http.Get(cl.URL(i) + v2machinePrefix)
 		if err != nil {
 			t.Errorf("%v", err)
 			break
@@ -59,23 +59,22 @@ func TestMachinesEndPoint(t *testing.T) {
 		}
 	}
 
-	destoryCluster(t, es, hs)
-	afterTest(t)
+	cl.Destroy()
 }
 
 func TestLeaderEndPoint(t *testing.T) {
-	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
+	cl := &testCluster{Size: 3}
+	cl.Start()
 
-	us := make([]string, len(hs))
-	for i := range hs {
-		us[i] = hs[i].URL
+	us := make([]string, cl.Size)
+	for i := 0; i < cl.Size; i++ {
+		us[i] = cl.URL(i)
 	}
 	// todo(xiangli) change this to raft port...
-	w := hs[0].URL + "/raft"
+	w := cl.URL(0) + "/raft"
 
-	for i := range hs {
-		r, err := http.Get(hs[i].URL + v2LeaderPrefix)
+	for i := 0; i < cl.Size; i++ {
+		r, err := http.Get(cl.URL(i) + v2LeaderPrefix)
 		if err != nil {
 			t.Errorf("%v", err)
 			break
@@ -91,15 +90,14 @@ func TestLeaderEndPoint(t *testing.T) {
 		}
 	}
 
-	destoryCluster(t, es, hs)
-	afterTest(t)
+	cl.Destroy()
 }
 
 func TestStoreStatsEndPoint(t *testing.T) {
-	es, hs := buildCluster(1, false)
-	waitCluster(t, es)
+	cl := &testCluster{Size: 1}
+	cl.Start()
 
-	resp, err := http.Get(hs[0].URL + v2StoreStatsPrefix)
+	resp, err := http.Get(cl.URL(0) + v2StoreStatsPrefix)
 	if err != nil {
 		t.Errorf("%v", err)
 	}
@@ -115,42 +113,36 @@ func TestStoreStatsEndPoint(t *testing.T) {
 		t.Errorf("setSuccess = %d, want 1", stats.SetSuccess)
 	}
 
-	destoryCluster(t, es, hs)
-	afterTest(t)
+	cl.Destroy()
 }
 
 func TestGetAdminConfigEndPoint(t *testing.T) {
-	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
+	cl := &testCluster{Size: 1}
+	cl.Start()
 
-	for i := range hs {
-		r, err := http.Get(hs[i].URL + v2adminConfigPrefix)
-		if err != nil {
-			t.Errorf("%v", err)
-			continue
-		}
-		if g := r.StatusCode; g != 200 {
-			t.Errorf("#%d: status = %d, want %d", i, g, 200)
-		}
-		if g := r.Header.Get("Content-Type"); g != "application/json" {
-			t.Errorf("#%d: ContentType = %d, want application/json", i, g)
-		}
-
-		conf := new(conf.ClusterConfig)
-		err = json.NewDecoder(r.Body).Decode(conf)
-		r.Body.Close()
-		if err != nil {
-			t.Errorf("%v", err)
-			continue
-		}
-		w := conf.NewClusterConfig()
-		if !reflect.DeepEqual(conf, w) {
-			t.Errorf("#%d: config = %+v, want %+v", i, conf, w)
-		}
+	r, err := http.Get(cl.URL(0) + v2adminConfigPrefix)
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	if g := r.StatusCode; g != 200 {
+		t.Errorf("status = %d, want %d", g, 200)
+	}
+	if g := r.Header.Get("Content-Type"); g != "application/json" {
+		t.Errorf("ContentType = %s, want application/json", g)
 	}
 
-	destoryCluster(t, es, hs)
-	afterTest(t)
+	cfg := new(conf.ClusterConfig)
+	err = json.NewDecoder(r.Body).Decode(cfg)
+	r.Body.Close()
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+	w := conf.NewClusterConfig()
+	if !reflect.DeepEqual(cfg, w) {
+		t.Errorf("config = %+v, want %+v", cfg, w)
+	}
+
+	cl.Destroy()
 }
 
 func TestPutAdminConfigEndPoint(t *testing.T) {
@@ -176,11 +168,11 @@ func TestPutAdminConfigEndPoint(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		es, hs := buildCluster(3, false)
-		waitCluster(t, es)
-		index := es[0].p.Index()
+		cl := &testCluster{Size: 1}
+		cl.Start()
+		index := cl.Participant(0).Index()
 
-		r, err := NewTestClient().Put(hs[0].URL+v2adminConfigPrefix, "application/json", bytes.NewBufferString(tt.c))
+		r, err := NewTestClient().Put(cl.URL(0)+v2adminConfigPrefix, "application/json", bytes.NewBufferString(tt.c))
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
@@ -193,31 +185,28 @@ func TestPutAdminConfigEndPoint(t *testing.T) {
 			t.Errorf("#%d: put result = %s, want %s", i, b, wbody)
 		}
 
-		for j := range es {
-			w, err := es[j].p.Watch(v2configKVPrefix, false, false, index)
-			if err != nil {
-				t.Errorf("%v", err)
-				continue
-			}
-			e := <-w.EventChan
-			if g := *e.Node.Value; g != tt.wc {
-				t.Errorf("#%d.%d: %s = %s, want %s", i, j, v2configKVPrefix, g, tt.wc)
-			}
+		w, err := cl.Participant(0).Watch(v2configKVPrefix, false, false, index)
+		if err != nil {
+			t.Errorf("%v", err)
+			continue
+		}
+		e := <-w.EventChan
+		if g := *e.Node.Value; g != tt.wc {
+			t.Errorf("#%d: %s = %s, want %s", i, v2configKVPrefix, g, tt.wc)
 		}
 
-		destoryCluster(t, es, hs)
+		cl.Destroy()
 	}
-	afterTest(t)
 }
 
 func TestGetAdminMachineEndPoint(t *testing.T) {
-	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
+	cl := &testCluster{Size: 3}
+	cl.Start()
 
-	for i := range es {
-		for j := range hs {
-			name := fmt.Sprint(es[i].id)
-			r, err := http.Get(hs[j].URL + v2adminMachinesPrefix + name)
+	for i := 0; i < cl.Size; i++ {
+		for j := 0; j < cl.Size; j++ {
+			name := fmt.Sprint(cl.Node(i).Id)
+			r, err := http.Get(cl.URL(j) + v2adminMachinesPrefix + name)
 			if err != nil {
 				t.Errorf("%v", err)
 				continue
@@ -226,7 +215,7 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 				t.Errorf("#%d on %d: status = %d, want %d", i, j, g, 200)
 			}
 			if g := r.Header.Get("Content-Type"); g != "application/json" {
-				t.Errorf("#%d on %d: ContentType = %d, want application/json", i, j, g)
+				t.Errorf("#%d on %d: ContentType = %s, want application/json", i, j, g)
 			}
 
 			m := new(machineMessage)
@@ -239,8 +228,8 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 			wm := &machineMessage{
 				Name:      name,
 				State:     stateFollower,
-				ClientURL: hs[i].URL,
-				PeerURL:   hs[i].URL,
+				ClientURL: cl.URL(i),
+				PeerURL:   cl.URL(i),
 			}
 			if i == 0 {
 				wm.State = stateLeader
@@ -251,27 +240,26 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 		}
 	}
 
-	destoryCluster(t, es, hs)
-	afterTest(t)
+	cl.Destroy()
 }
 
 func TestGetAdminMachinesEndPoint(t *testing.T) {
-	es, hs := buildCluster(3, false)
-	waitCluster(t, es)
+	cl := &testCluster{Size: 3}
+	cl.Start()
 
-	w := make([]*machineMessage, len(hs))
-	for i := range hs {
+	w := make([]*machineMessage, cl.Size)
+	for i := 0; i < cl.Size; i++ {
 		w[i] = &machineMessage{
-			Name:      fmt.Sprint(es[i].id),
+			Name:      fmt.Sprint(cl.Node(i).Id),
 			State:     stateFollower,
-			ClientURL: hs[i].URL,
-			PeerURL:   hs[i].URL,
+			ClientURL: cl.URL(i),
+			PeerURL:   cl.URL(i),
 		}
 	}
 	w[0].State = stateLeader
 
-	for i := range hs {
-		r, err := http.Get(hs[i].URL + v2adminMachinesPrefix)
+	for i := 0; i < cl.Size; i++ {
+		r, err := http.Get(cl.URL(i) + v2adminMachinesPrefix)
 		if err != nil {
 			t.Errorf("%v", err)
 			continue
@@ -294,8 +282,7 @@ func TestGetAdminMachinesEndPoint(t *testing.T) {
 		}
 	}
 
-	destoryCluster(t, es, hs)
-	afterTest(t)
+	cl.Destroy()
 }
 
 // int64Slice implements sort interface
