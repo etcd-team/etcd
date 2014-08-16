@@ -55,6 +55,13 @@ func New(path string) (*WAL, error) {
 	if err != nil {
 		return nil, err
 	}
+	if IsBtrfs(path) {
+		if err := SetNOCOWFile(path); err != nil {
+			log.Printf("path=%s wal.setNOCOW err=%q", path, err)
+		} else {
+			log.Printf("path=%s wal.setNOCOW", path)
+		}
+	}
 	return newWAL(f), nil
 }
 
