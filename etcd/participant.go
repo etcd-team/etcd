@@ -54,12 +54,15 @@ const (
 	v2StoreStatsPrefix    = "/v2/stats/store"
 	v2adminConfigPrefix   = "/v2/admin/config"
 	v2adminMachinesPrefix = "/v2/admin/machines/"
+
+	sizeCheckInterval = time.Second
 )
 
 var (
 	tmpErr      = fmt.Errorf("try again")
 	stopErr     = fmt.Errorf("server is stopped")
 	raftStopErr = fmt.Errorf("raft is stopped")
+	fullErr     = fmt.Errorf("cluster is full")
 )
 
 type participant struct {
@@ -73,10 +76,11 @@ type participant struct {
 	client  *v2client
 	peerHub *peerHub
 
-	proposal    chan v2Proposal
-	addNodeC    chan raft.Config
-	removeNodeC chan raft.Config
-	node        *v2Raft
+	proposal       chan v2Proposal
+	clusterConfigC chan int64
+	addNodeC       chan raft.Config
+	removeNodeC    chan raft.Config
+	node           *v2Raft
 	store.Store
 	rh          *raftHandler
 	w           *wal.WAL
@@ -96,9 +100,10 @@ func newParticipant(id int64, c *conf.Config, client *v2client, peerHub *peerHub
 		client:  client,
 		peerHub: peerHub,
 
-		proposal:    make(chan v2Proposal, maxBufferedProposal),
-		addNodeC:    make(chan raft.Config, 1),
-		removeNodeC: make(chan raft.Config, 1),
+		proposal:       make(chan v2Proposal, maxBufferedProposal),
+		clusterConfigC: make(chan int64, 1),
+		addNodeC:       make(chan raft.Config, 1),
+		removeNodeC:    make(chan raft.Config, 1),
 		node: &v2Raft{
 			result: make(map[wait]chan interface{}),
 		},
@@ -172,7 +177,8 @@ func (p *participant) run(stop chan struct{}) {
 		} else {
 			log.Printf("id=%x participant.run action=join seeds=\"%v\"\n", p.id, seeds)
 			if err := p.join(); err != nil {
-				log.Fatalf("id=%x participant.join err=%q", p.id, err)
+				log.Printf("id=%x participant.run joinErr=%q", p.id, err)
+				return
 			}
 		}
 	}
@@ -187,22 +193,35 @@ func (p *participant) run(stop chan struct{}) {
 	defer ticker.Stop()
 	v2SyncTicker := time.NewTicker(time.Millisecond * 500)
 	defer v2SyncTicker.Stop()
+	v2SizeCheckTicker := time.NewTicker(sizeCheckInterval)
+	defer v2SizeCheckTicker.Stop()
 
 	var proposal chan v2Proposal
+	var clusterConfigC chan int64
 	var addNodeC, removeNodeC chan raft.Config
+	var v2SizeCheckC <-chan time.Time
 	for {
 		if node.HasLeader() {
 			proposal = p.proposal
+			clusterConfigC = p.clusterConfigC
 			addNodeC = p.addNodeC
 			removeNodeC = p.removeNodeC
 		} else {
 			proposal = nil
+			clusterConfigC = nil
 			addNodeC = nil
 			removeNodeC = nil
+		}
+		if node.IsLeader() {
+			v2SizeCheckC = v2SizeCheckTicker.C
+		} else {
+			v2SizeCheckC = nil
 		}
 		select {
 		case p := <-proposal:
 			node.Propose(p)
+		case s := <-clusterConfigC:
+			node.ConfigCluster(s)
 		case c := <-addNodeC:
 			node.UpdateConf(raft.AddNode, &c)
 		case c := <-removeNodeC:
@@ -213,6 +232,8 @@ func (p *participant) run(stop chan struct{}) {
 			node.Tick()
 		case <-v2SyncTicker.C:
 			node.Sync()
+		case <-v2SizeCheckC:
+			p.maybeShrinkSize()
 		case <-stop:
 			log.Printf("id=%x participant.stop\n", p.id)
 			return
@@ -256,6 +277,9 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 	log.Printf("id=%x participant.add nodeId=%x raftPubAddr=%s pubAddr=%s\n", p.id, id, raftPubAddr, pubAddr)
 	pp := path.Join(v2machineKVPrefix, fmt.Sprint(id))
 
+	// The pre-checking gives caller possible hints on why it cannot join cluster.
+	// The result could be wrong in rare cases, but it will be corrected in a
+	// short time if it still has connection with the cluster.
 	_, err := p.Store.Get(pp, false, false)
 	if err == nil {
 		return nil
@@ -263,6 +287,11 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 	if v, ok := err.(*etcdErr.Error); !ok || v.ErrorCode != etcdErr.EcodeKeyNotFound {
 		log.Printf("id=%x participant.add getErr=\"%v\"\n", p.id, err)
 		return err
+	}
+	size := len(p.node.Nodes())
+	if size >= p.clusterConfig().ActiveSize {
+		log.Printf("id=%x participant.add addNodeErr=%q", p.id, fullErr)
+		return etcdErr.NewError(etcdErr.EcodeNoMorePeer, "", uint64(p.node.Applied()))
 	}
 
 	w, err := p.Watch(pp, true, false, 0)
@@ -281,11 +310,11 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 
 	select {
 	case v := <-w.EventChan:
-		if v.Action == store.Set {
-			return nil
+		if v.Action != store.Set {
+			log.Printf("id=%x participant.add watchErr=\"unexpected action\" action=%s", p.id, v.Action)
+			return tmpErr
 		}
-		log.Printf("id=%x participant.add watchErr=\"unexpected action\" action=%s\n", p.id, v.Action)
-		return tmpErr
+		return nil
 	case <-time.After(6 * defaultHeartbeat * p.tickDuration):
 		w.Remove()
 		log.Printf("id=%x participant.add watchErr=timeout\n", p.id)
@@ -348,15 +377,19 @@ func (p *participant) apply(ents []raft.Entry) {
 		case raft.ClusterInit:
 			p.clusterId = p.node.ClusterId()
 			log.Printf("id=%x participant.cluster.setId clusterId=%x\n", p.id, p.clusterId)
+		case raft.ClusterConfig:
+			cc := p.clusterConfig()
+			cc.ActiveSize = int(p.node.MaxSize())
+			b, err := json.Marshal(cc)
+			if err != nil {
+				panic(err)
+			}
+			p.Store.Set(v2configKVPrefix, false, string(b), store.Permanent)
+			log.Printf("id=%x participant.cluster.setConfig maxSize=%d", p.id, p.node.MaxSize())
 		case raft.AddNode:
 			cfg := new(raft.Config)
 			if err := json.Unmarshal(ent.Data, cfg); err != nil {
 				log.Printf("id=%x participant.cluster.addNode unmarshalErr=\"%v\"\n", p.id, err)
-				break
-			}
-			pp := path.Join(v2machineKVPrefix, fmt.Sprint(cfg.NodeId))
-			if ev, _ := p.Store.Get(pp, false, false); ev != nil {
-				log.Printf("id=%x participant.cluster.addNode err=existed value=%q", p.id, *ev.Node.Value)
 				break
 			}
 			peer, err := p.peerHub.add(cfg.NodeId, cfg.Addr)
@@ -365,6 +398,7 @@ func (p *participant) apply(ents []raft.Entry) {
 				break
 			}
 			peer.participate()
+			pp := path.Join(v2machineKVPrefix, fmt.Sprint(cfg.NodeId))
 			p.Store.Set(pp, false, fmt.Sprintf("raft=%v&etcd=%v", cfg.Addr, string(cfg.Context)), store.Permanent)
 			if p.id == cfg.NodeId {
 				p.raftPubAddr = cfg.Addr
@@ -408,6 +442,22 @@ func (p *participant) save(ents []raft.Entry, state raft.State) {
 
 }
 
+func (p *participant) maybeShrinkSize() {
+	nodes := p.node.Nodes()
+	activeSize := p.clusterConfig().ActiveSize
+	if activeSize <= 0 || len(nodes) <= activeSize {
+		return
+	}
+	log.Printf("id=%x participant.checkActiveSize size=%d expectedSize=%d", p.id, len(nodes), activeSize)
+	rmId := nodes[0]
+	// It doesn't remove the leader to avoid extra leader change.
+	if len(nodes) > 1 && rmId == p.id {
+		rmId = nodes[1]
+	}
+	p.node.UpdateConf(raft.RemoveNode, &raft.Config{NodeId: rmId})
+	log.Printf("id=%x participant.checkActiveSize remove=%d", p.id, rmId)
+}
+
 func (p *participant) send(msgs []raft.Message) {
 	for i := range msgs {
 		if err := p.peerHub.send(msgs[i]); err != nil {
@@ -427,11 +477,14 @@ func (p *participant) join() error {
 	max := p.cfg.MaxRetryAttempts
 	for attempt := 0; ; attempt++ {
 		for seed := range p.peerHub.getSeeds() {
-			if err := p.client.AddMachine(seed, fmt.Sprint(p.id), info); err == nil {
-				return nil
-			} else {
-				log.Printf("id=%x participant.join addMachineErr=\"%v\"\n", p.id, err)
+			if err := p.client.AddMachine(seed, fmt.Sprint(p.id), info); err != nil {
+				log.Printf("id=%x participant.join addMachineErr=%q", p.id, err)
+				if err.ErrorCode == etcdErr.EcodeNoMorePeer {
+					return fullErr
+				}
+				continue
 			}
+			return nil
 		}
 		if attempt == max {
 			return fmt.Errorf("etcd: cannot join cluster after %d attempts", max)

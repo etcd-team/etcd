@@ -31,8 +31,10 @@ type Node struct {
 	heartbeat    tick
 
 	// TODO: it needs garbage collection later
-	rmNodes map[int64]struct{}
-	removed bool
+	rmNodes       map[int64]struct{}
+	removed       bool
+	bootstrapping bool
+	maxSize       int64
 }
 
 func New(id int64, heartbeat, election tick) *Node {
@@ -45,8 +47,9 @@ func New(id int64, heartbeat, election tick) *Node {
 		heartbeat:    heartbeat,
 		election:     election,
 		electionRand: election + tick(rand.Int31())%election,
-		sm:           newStateMachine(id, []int64{id}),
+		sm:           newStateMachine(id, []int64{}),
 		rmNodes:      make(map[int64]struct{}),
+		maxSize:      11,
 	}
 
 	return n
@@ -62,6 +65,8 @@ func Recover(id int64, ents []Entry, state State, heartbeat, election tick) *Nod
 func (n *Node) Id() int64 { return n.sm.id }
 
 func (n *Node) ClusterId() int64 { return n.sm.clusterId }
+
+func (n *Node) MaxSize() int64 { return n.maxSize }
 
 func (n *Node) Info() Info {
 	return Info{Id: n.Id()}
@@ -97,12 +102,23 @@ func (n *Node) propose(t int64, data []byte) {
 	n.Step(Message{From: n.sm.id, ClusterId: n.ClusterId(), Type: msgProp, Entries: []Entry{{Type: t, Data: data}}})
 }
 
-func (n *Node) Campaign() { n.Step(Message{From: n.sm.id, ClusterId: n.ClusterId(), Type: msgHup}) }
+func (n *Node) Campaign() {
+	id := n.sm.id
+	n.sm = newStateMachine(id, []int64{id})
+	n.Step(Message{From: id, ClusterId: n.ClusterId(), Type: msgHup})
+	n.bootstrapping = true
+}
 
 func (n *Node) InitCluster(clusterId int64) {
 	d := make([]byte, 10)
 	wn := binary.PutVarint(d, clusterId)
 	n.propose(ClusterInit, d[:wn])
+}
+
+func (n *Node) ConfigCluster(maxSize int64) {
+	d := make([]byte, 10)
+	wn := binary.PutVarint(d, maxSize)
+	n.propose(ClusterConfig, d[:wn])
 }
 
 func (n *Node) Add(id int64, addr string, context []byte) {
@@ -169,11 +185,35 @@ func (n *Node) Next() []Entry {
 				panic("cannot init a started cluster")
 			}
 			n.sm.clusterId = cid
+		case ClusterConfig:
+			maxSize, nr := binary.Varint(ents[i].Data)
+			if nr <= 0 {
+				panic("config cluster failed: cannot read maxSize")
+			}
+			n.maxSize = maxSize
+			n.sm.pendingConf = false
 		case AddNode:
 			c := new(Config)
 			if err := json.Unmarshal(ents[i].Data, c); err != nil {
 				log.Printf("raft: err=%q", err)
 				continue
+			}
+			if n.maxSize != 0 && int64(len(n.sm.ins)+1) > n.maxSize {
+				log.Printf("raft.Next.addNode id=%x err=exceedMaxSize", c.NodeId)
+				ents[i].becomeNoop()
+				break
+			}
+			if _, ok := n.sm.ins[c.NodeId]; ok {
+				if n.bootstrapping {
+					if c.NodeId != n.sm.id {
+						panic("should add bootstrapper as the first step")
+					}
+					n.bootstrapping = false
+				} else {
+					log.Printf("raft.Next.addNode id=%x err=existed", c.NodeId)
+					ents[i].becomeNoop()
+					break
+				}
 			}
 			n.sm.addNode(c.NodeId)
 			delete(n.rmNodes, c.NodeId)
@@ -182,6 +222,11 @@ func (n *Node) Next() []Entry {
 			if err := json.Unmarshal(ents[i].Data, c); err != nil {
 				log.Printf("raft: err=%q", err)
 				continue
+			}
+			if _, ok := n.sm.ins[c.NodeId]; !ok {
+				log.Printf("raft.Next.removeNode id=%x err=notExisted", c.NodeId)
+				ents[i].becomeNoop()
+				break
 			}
 			n.sm.removeNode(c.NodeId)
 			n.rmNodes[c.NodeId] = struct{}{}

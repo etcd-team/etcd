@@ -6,6 +6,7 @@ const (
 	Normal int64 = iota
 
 	ClusterInit
+	ClusterConfig
 	AddNode
 	RemoveNode
 )
@@ -15,7 +16,12 @@ const (
 )
 
 func (e *Entry) isConfig() bool {
-	return e.Type == AddNode || e.Type == RemoveNode
+	return e.Type == ClusterConfig || e.Type == AddNode || e.Type == RemoveNode
+}
+
+func (e *Entry) becomeNoop() {
+	e.Type = Normal
+	e.Data = nil
 }
 
 type raftLog struct {

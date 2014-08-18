@@ -38,7 +38,22 @@ func TestMultipleNodes(t *testing.T) {
 	tests := []int{1, 3, 5, 9, 11}
 
 	for _, tt := range tests {
-		c := &testCluster{Size: tt}
+		ccfg := conf.NewClusterConfig()
+		ccfg.ActiveSize = tt
+		c := &testCluster{Size: tt, Config: ccfg}
+		c.Start()
+		c.Destroy()
+	}
+}
+
+func TestMultipleNodesWithStandby(t *testing.T) {
+	defer afterTest(t)
+	tests := []int{1, 3, 5, 9, 11}
+
+	for _, tt := range tests {
+		ccfg := conf.NewClusterConfig()
+		ccfg.ActiveSize = tt
+		c := &testCluster{Size: tt * 2, Config: ccfg}
 		c.Start()
 		c.Destroy()
 	}
@@ -92,9 +107,9 @@ func TestRemove(t *testing.T) {
 			cl.Start()
 
 			lead, _ := cl.Leader()
-			config := conf.NewClusterConfig()
-			config.ActiveSize = 0
-			if err := cl.Participant(int(lead)).setClusterConfig(config); err != nil {
+			cfg := conf.NewClusterConfig()
+			cfg.ActiveSize = 0
+			if err := cl.Participant(int(lead)).setClusterConfig(cfg); err != nil {
 				t.Fatalf("#%d: setClusterConfig err = %v", k, err)
 			}
 
@@ -131,6 +146,28 @@ func TestRemove(t *testing.T) {
 // maxSize -> standby
 // auto-demote -> standby
 // remove -> standby
+
+func TestDecreaseActiveSize(t *testing.T) {
+	cl := &testCluster{Size: 9}
+	cl.Start()
+	defer cl.Destroy()
+
+	lead, _ := cl.Leader()
+	if g := len(cl.Participant(int(lead)).node.Nodes()); g != cl.Size {
+		t.Errorf("size = %d, want %d", g, cl.Size)
+	}
+
+	cfg := conf.NewClusterConfig()
+	cfg.ActiveSize = cl.Size - 1
+	if err := cl.Participant(int(lead)).setClusterConfig(cfg); err != nil {
+		t.Fatalf("setClusterConfig err = %v", err)
+	}
+
+	time.Sleep(sizeCheckInterval)
+	if g := len(cl.Participant(int(lead)).node.Nodes()); g != cl.Size-1 {
+		t.Errorf("size = %d, want %d", g, cl.Size-1)
+	}
+}
 
 func TestReleaseVersion(t *testing.T) {
 	defer afterTest(t)
@@ -287,8 +324,9 @@ func TestRestoreSnapshotFromLeader(t *testing.T) {
 }
 
 type testCluster struct {
-	Size int
-	TLS  bool
+	Size   int
+	TLS    bool
+	Config *conf.ClusterConfig
 
 	nodes []*testServer
 }
@@ -304,6 +342,14 @@ func (c *testCluster) Start() {
 	nodes[0].Start()
 	nodes[0].WaitMode(participantMode)
 
+	if c.Config == nil {
+		c.Config = conf.NewClusterConfig()
+	} else {
+		if err := nodes[0].Participant().setClusterConfig(c.Config); err != nil {
+			panic(err)
+		}
+	}
+
 	seed := nodes[0].URL
 	for i := 1; i < c.Size; i++ {
 		cfg := newTestConfig()
@@ -317,18 +363,25 @@ func (c *testCluster) Start() {
 		// or this configuration request might be dropped.
 		// Or it could be a slow join because it needs to retry.
 		// TODO: this might not be true if we add param for retry interval.
-		s.WaitMode(participantMode)
-		w, err := s.Participant().Watch(v2machineKVPrefix, true, false, uint64(i))
-		if err != nil {
-			panic(err)
+		if i >= c.Config.ActiveSize {
+			s.WaitMode(standbyMode)
+		} else {
+			s.WaitMode(participantMode)
+			w, err := s.Participant().Watch(v2machineKVPrefix, true, false, uint64(i))
+			if err != nil {
+				panic(err)
+			}
+			<-w.EventChan
 		}
-		<-w.EventChan
 	}
 	c.wait()
 }
 
 func (c *testCluster) wait() {
 	size := c.Size
+	if size > c.Config.ActiveSize {
+		size = c.Config.ActiveSize
+	}
 	for i := 0; i < size; i++ {
 		for k := 0; k < size; k++ {
 			s := c.Node(i)
