@@ -16,9 +16,9 @@ import (
 )
 
 type Dataset struct {
-	conf     *Config
-	snapshot *Snapshot
-	entries  []*protobuf.LogEntry
+	Config   *Config
+	Snapshot *Snapshot
+	Entries  []*protobuf.LogEntry
 }
 
 // A peer is a reference to another server involved in the consensus protocol.
@@ -47,9 +47,7 @@ type Config struct {
 
 func LoadDataset(dirpath string) (*Dataset, error) {
 	conf, err := ReadConfFile(path.Join(dirpath, "conf"))
-	if os.IsNotExist(err) {
-		conf = new(Config)
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -73,7 +71,7 @@ func LoadDataset(dirpath string) (*Dataset, error) {
 		}
 	}
 
-	return &Dataset{conf: conf, entries: entries, snapshot: snapshot}, nil
+	return &Dataset{Config: conf, Entries: entries, Snapshot: snapshot}, nil
 }
 
 func ReadConfFile(path string) (*Config, error) {

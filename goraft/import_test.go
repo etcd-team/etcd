@@ -78,13 +78,13 @@ func TestLoadDataSet(t *testing.T) {
 		t.Fatalf("load dataset error: %v", err)
 	}
 
-	if dataset.conf == nil {
+	if dataset.Config == nil {
 		t.Errorf("conf = nil, want sth")
 	}
-	if dataset.entries == nil {
+	if dataset.Entries == nil {
 		t.Errorf("entries = nil, want sth")
 	}
-	if dataset.snapshot == nil {
+	if dataset.Snapshot == nil {
 		t.Errorf("snapshot = nil, want sth")
 	}
 }
