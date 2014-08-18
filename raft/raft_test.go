@@ -507,25 +507,25 @@ func TestRecvMsgVote(t *testing.T) {
 		voteFor int64
 		w       int64
 	}{
-		{stateFollower, 0, 0, none, -1},
-		{stateFollower, 0, 1, none, -1},
-		{stateFollower, 0, 2, none, -1},
-		{stateFollower, 0, 3, none, 2},
+		{stateFollower, 0, 0, NoneId, -1},
+		{stateFollower, 0, 1, NoneId, -1},
+		{stateFollower, 0, 2, NoneId, -1},
+		{stateFollower, 0, 3, NoneId, 2},
 
-		{stateFollower, 1, 0, none, -1},
-		{stateFollower, 1, 1, none, -1},
-		{stateFollower, 1, 2, none, -1},
-		{stateFollower, 1, 3, none, 2},
+		{stateFollower, 1, 0, NoneId, -1},
+		{stateFollower, 1, 1, NoneId, -1},
+		{stateFollower, 1, 2, NoneId, -1},
+		{stateFollower, 1, 3, NoneId, 2},
 
-		{stateFollower, 2, 0, none, -1},
-		{stateFollower, 2, 1, none, -1},
-		{stateFollower, 2, 2, none, 2},
-		{stateFollower, 2, 3, none, 2},
+		{stateFollower, 2, 0, NoneId, -1},
+		{stateFollower, 2, 1, NoneId, -1},
+		{stateFollower, 2, 2, NoneId, 2},
+		{stateFollower, 2, 3, NoneId, 2},
 
-		{stateFollower, 3, 0, none, -1},
-		{stateFollower, 3, 1, none, -1},
-		{stateFollower, 3, 2, none, 2},
-		{stateFollower, 3, 3, none, 2},
+		{stateFollower, 3, 0, NoneId, -1},
+		{stateFollower, 3, 1, NoneId, -1},
+		{stateFollower, 3, 2, NoneId, 2},
+		{stateFollower, 3, 3, NoneId, 2},
 
 		{stateFollower, 3, 2, 1, 2},
 		{stateFollower, 3, 2, 0, -1},
@@ -562,16 +562,16 @@ func TestStateTransition(t *testing.T) {
 		wterm  int64
 		wlead  int64
 	}{
-		{stateFollower, stateFollower, true, 1, none},
-		{stateFollower, stateCandidate, true, 1, none},
-		{stateFollower, stateLeader, false, -1, none},
+		{stateFollower, stateFollower, true, 1, NoneId},
+		{stateFollower, stateCandidate, true, 1, NoneId},
+		{stateFollower, stateLeader, false, -1, NoneId},
 
-		{stateCandidate, stateFollower, true, 0, none},
-		{stateCandidate, stateCandidate, true, 1, none},
+		{stateCandidate, stateFollower, true, 0, NoneId},
+		{stateCandidate, stateCandidate, true, 1, NoneId},
 		{stateCandidate, stateLeader, true, 0, 0},
 
-		{stateLeader, stateFollower, true, 1, none},
-		{stateLeader, stateCandidate, false, 1, none},
+		{stateLeader, stateFollower, true, 1, NoneId},
+		{stateLeader, stateCandidate, false, 1, NoneId},
 		{stateLeader, stateLeader, true, 0, 0},
 	}
 
@@ -697,10 +697,10 @@ func TestAllServerStepdown(t *testing.T) {
 			}
 			wlead := int64(1)
 			if msgType == msgVote {
-				wlead = none
+				wlead = NoneId
 			}
 			if sm.lead.Get() != wlead {
-				t.Errorf("#%d, sm.lead = %d, want %d", i, sm.lead.Get(), none)
+				t.Errorf("#%d, sm.lead = %d, want %d", i, sm.lead.Get(), NoneId)
 			}
 		}
 	}

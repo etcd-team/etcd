@@ -73,7 +73,7 @@ func (n *Node) Term() int64 { return n.sm.term.Get() }
 
 func (n *Node) Applied() int64 { return n.sm.raftLog.applied }
 
-func (n *Node) HasLeader() bool { return n.Leader() != none }
+func (n *Node) HasLeader() bool { return n.Leader() != NoneId }
 
 func (n *Node) IsLeader() bool { return n.Leader() == n.Id() }
 
@@ -120,7 +120,7 @@ func (n *Node) Step(m Message) bool {
 		n.removed = true
 		return false
 	}
-	if n.ClusterId() != none && m.ClusterId != none && m.ClusterId != n.ClusterId() {
+	if n.ClusterId() != NoneId && m.ClusterId != NoneId && m.ClusterId != n.ClusterId() {
 		log.Printf("deny message from=%d cluster=%d", m.From, m.ClusterId)
 		n.sm.send(Message{To: m.From, ClusterId: n.ClusterId(), Type: msgDenied})
 		return true

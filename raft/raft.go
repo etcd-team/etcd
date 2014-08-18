@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 )
 
-const none = -1
+const NoneId = -1
 
 type messageType int64
 
@@ -163,10 +163,10 @@ type stateMachine struct {
 }
 
 func newStateMachine(id int64, peers []int64) *stateMachine {
-	if id == none {
+	if id == NoneId {
 		panic("cannot use none id")
 	}
-	sm := &stateMachine{id: id, clusterId: none, lead: none, raftLog: newLog(), ins: make(map[int64]*index)}
+	sm := &stateMachine{id: id, clusterId: NoneId, lead: NoneId, raftLog: newLog(), ins: make(map[int64]*index)}
 	for _, p := range peers {
 		sm.ins[p] = &index{}
 	}
@@ -278,8 +278,8 @@ func (sm *stateMachine) nextEnts() (ents []Entry) {
 
 func (sm *stateMachine) reset(term int64) {
 	sm.setTerm(term)
-	sm.lead.Set(none)
-	sm.setVote(none)
+	sm.lead.Set(NoneId)
+	sm.setVote(NoneId)
 	sm.votes = make(map[int64]bool)
 	for i := range sm.ins {
 		sm.ins[i] = &index{next: sm.raftLog.lastIndex() + 1}
@@ -366,7 +366,7 @@ func (sm *stateMachine) Step(m Message) (ok bool) {
 	case m.Term > sm.term.Get():
 		lead := m.From
 		if m.Type == msgVote {
-			lead = none
+			lead = NoneId
 		}
 		sm.becomeFollower(m.Term, lead)
 	case m.Term < sm.term.Get():
@@ -461,7 +461,7 @@ func stepCandidate(sm *stateMachine, m Message) bool {
 			sm.becomeLeader()
 			sm.bcastAppend()
 		case len(sm.votes) - gr:
-			sm.becomeFollower(sm.term.Get(), none)
+			sm.becomeFollower(sm.term.Get(), NoneId)
 		}
 	}
 	return true
@@ -470,7 +470,7 @@ func stepCandidate(sm *stateMachine, m Message) bool {
 func stepFollower(sm *stateMachine, m Message) bool {
 	switch m.Type {
 	case msgProp:
-		if sm.lead.Get() == none {
+		if sm.lead.Get() == NoneId {
 			return false
 		}
 		m.To = sm.lead.Get()
@@ -481,7 +481,7 @@ func stepFollower(sm *stateMachine, m Message) bool {
 	case msgSnap:
 		sm.handleSnapshot(m)
 	case msgVote:
-		if (sm.vote == none || sm.vote == m.From) && sm.raftLog.isUpToDate(m.Index, m.LogTerm) {
+		if (sm.vote == NoneId || sm.vote == m.From) && sm.raftLog.isUpToDate(m.Index, m.LogTerm) {
 			sm.setVote(m.From)
 			sm.send(Message{To: m.From, Type: msgVoteResp, Index: sm.raftLog.lastIndex()})
 		} else {
