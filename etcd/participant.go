@@ -76,10 +76,11 @@ type participant struct {
 	client  *v2client
 	peerHub *peerHub
 
-	proposal    chan v2Proposal
-	addNodeC    chan raft.Config
-	removeNodeC chan raft.Config
-	node        *v2Raft
+	proposal       chan v2Proposal
+	clusterConfigC chan int64
+	addNodeC       chan raft.Config
+	removeNodeC    chan raft.Config
+	node           *v2Raft
 	store.Store
 	rh          *raftHandler
 	w           *wal.WAL
@@ -99,9 +100,10 @@ func newParticipant(id int64, c *conf.Config, client *v2client, peerHub *peerHub
 		client:  client,
 		peerHub: peerHub,
 
-		proposal:    make(chan v2Proposal, maxBufferedProposal),
-		addNodeC:    make(chan raft.Config, 1),
-		removeNodeC: make(chan raft.Config, 1),
+		proposal:       make(chan v2Proposal, maxBufferedProposal),
+		clusterConfigC: make(chan int64, 1),
+		addNodeC:       make(chan raft.Config, 1),
+		removeNodeC:    make(chan raft.Config, 1),
 		node: &v2Raft{
 			result: make(map[wait]chan interface{}),
 		},
@@ -195,15 +197,18 @@ func (p *participant) run(stop chan struct{}) {
 	defer v2SizeCheckTicker.Stop()
 
 	var proposal chan v2Proposal
+	var clusterConfigC chan int64
 	var addNodeC, removeNodeC chan raft.Config
 	var v2SizeCheckC <-chan time.Time
 	for {
 		if node.HasLeader() {
 			proposal = p.proposal
+			clusterConfigC = p.clusterConfigC
 			addNodeC = p.addNodeC
 			removeNodeC = p.removeNodeC
 		} else {
 			proposal = nil
+			clusterConfigC = nil
 			addNodeC = nil
 			removeNodeC = nil
 		}
@@ -215,6 +220,8 @@ func (p *participant) run(stop chan struct{}) {
 		select {
 		case p := <-proposal:
 			node.Propose(p)
+		case s := <-clusterConfigC:
+			node.ConfigCluster(s)
 		case c := <-addNodeC:
 			node.UpdateConf(raft.AddNode, &c)
 		case c := <-removeNodeC:
@@ -294,7 +301,7 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 	}
 
 	select {
-	case p.addNodeC <- raft.Config{NodeId: id, Addr: raftPubAddr, ExpectedSize: size + 1, Context: []byte(pubAddr)}:
+	case p.addNodeC <- raft.Config{NodeId: id, Addr: raftPubAddr, Context: []byte(pubAddr)}:
 	default:
 		w.Remove()
 		log.Printf("id=%x participant.add proposeErr=\"unable to send out addNode proposal\"\n", p.id)
@@ -370,6 +377,15 @@ func (p *participant) apply(ents []raft.Entry) {
 		case raft.ClusterInit:
 			p.clusterId = p.node.ClusterId()
 			log.Printf("id=%x participant.cluster.setId clusterId=%x\n", p.id, p.clusterId)
+		case raft.ClusterConfig:
+			cc := p.clusterConfig()
+			cc.ActiveSize = int(p.node.MaxSize())
+			b, err := json.Marshal(cc)
+			if err != nil {
+				panic(err)
+			}
+			p.Store.Set(v2configKVPrefix, false, string(b), store.Permanent)
+			log.Printf("id=%x participant.cluster.setConfig maxSize=%d", p.id, p.node.MaxSize())
 		case raft.AddNode:
 			cfg := new(raft.Config)
 			if err := json.Unmarshal(ent.Data, cfg); err != nil {
@@ -438,7 +454,7 @@ func (p *participant) maybeShrinkSize() {
 	if len(nodes) > 1 && rmId == p.id {
 		rmId = nodes[1]
 	}
-	p.node.UpdateConf(raft.RemoveNode, &raft.Config{NodeId: rmId, ExpectedSize: len(nodes) - 1})
+	p.node.UpdateConf(raft.RemoveNode, &raft.Config{NodeId: rmId})
 	log.Printf("id=%x participant.checkActiveSize remove=%d", p.id, rmId)
 }
 

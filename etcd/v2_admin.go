@@ -19,11 +19,13 @@ package etcd
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/etcd/conf"
 	"github.com/coreos/etcd/store"
@@ -129,6 +131,37 @@ func (p *participant) clusterConfig() *conf.ClusterConfig {
 }
 
 func (p *participant) setClusterConfig(c *conf.ClusterConfig) error {
+	log.Printf("id=%x participant.setClusterConfig config=%+v", p.id, c)
+	w, err := p.Watch(v2configKVPrefix, true, false, 0)
+	if err != nil {
+		log.Printf("id=%x participant.setClusterConfig err=%q", p.id, err)
+		return tmpErr
+	}
+
+	select {
+	case p.clusterConfigC <- int64(c.ActiveSize):
+	default:
+		w.Remove()
+		log.Printf("id=%x participant.setClusterConfig err=\"unable to send out clusterConfig proposal\"", p.id)
+		return tmpErr
+	}
+
+	select {
+	case v := <-w.EventChan:
+		var cc conf.ClusterConfig
+		if err := json.Unmarshal([]byte(*v.Node.Value), &cc); err != nil {
+			panic(err)
+		}
+		if cc.ActiveSize != c.ActiveSize {
+			log.Printf("id=%x participant.setClusterConfig err=unmatchedActiveSize", p.id)
+			return tmpErr
+		}
+	case <-time.After(6 * defaultHeartbeat * p.tickDuration):
+		w.Remove()
+		log.Printf("id=%x participant.setClusterConfig watchErr=timeout", p.id)
+		return tmpErr
+	}
+
 	b, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -136,6 +169,7 @@ func (p *participant) setClusterConfig(c *conf.ClusterConfig) error {
 	if _, err := p.Set(v2configKVPrefix, false, string(b), store.Permanent); err != nil {
 		return err
 	}
+
 	return nil
 }
 

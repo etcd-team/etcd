@@ -170,7 +170,6 @@ func TestPutAdminConfigEndPoint(t *testing.T) {
 	for i, tt := range tests {
 		cl := &testCluster{Size: 1}
 		cl.Start()
-		index := cl.Participant(0).Index()
 
 		r, err := NewTestClient().Put(cl.URL(0)+v2adminConfigPrefix, "application/json", bytes.NewBufferString(tt.c))
 		if err != nil {
@@ -185,12 +184,7 @@ func TestPutAdminConfigEndPoint(t *testing.T) {
 			t.Errorf("#%d: put result = %s, want %s", i, b, wbody)
 		}
 
-		w, err := cl.Participant(0).Watch(v2configKVPrefix, false, false, index)
-		if err != nil {
-			t.Errorf("%v", err)
-			continue
-		}
-		e := <-w.EventChan
+		e, err := cl.Participant(0).Get(v2configKVPrefix, false, false)
 		if g := *e.Node.Value; g != tt.wc {
 			t.Errorf("#%d: %s = %s, want %s", i, v2configKVPrefix, g, tt.wc)
 		}
