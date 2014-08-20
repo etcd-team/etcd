@@ -18,6 +18,12 @@ func (e *Entry) isConfig() bool {
 	return e.Type == AddNode || e.Type == RemoveNode
 }
 
+var emptySnapshot = Snapshot{}
+
+func (s Snapshot) IsEmpty() bool {
+	return s.Term == 0
+}
+
 type raftLog struct {
 	ents             []Entry
 	unstable         int64
@@ -157,7 +163,13 @@ func (l *raftLog) compact(i int64) int64 {
 }
 
 func (l *raftLog) snap(d []byte, clusterId, index, term int64, nodes []int64) {
-	l.snapshot = Snapshot{clusterId, d, nodes, index, term}
+	l.snapshot = Snapshot{
+		ClusterId: clusterId,
+		Data:      d,
+		Nodes:     nodes,
+		Index:     index,
+		Term:      term,
+	}
 }
 
 func (l *raftLog) shouldCompact() bool {
