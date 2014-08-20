@@ -1,7 +1,6 @@
 package snap
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -37,8 +36,7 @@ func New(dir string) *Snapshotter {
 
 func (s *Snapshotter) Save(snapshot *raft.Snapshot) error {
 	fname := fmt.Sprintf("%016x-%016x-%016x%s", snapshot.ClusterId, snapshot.Term, snapshot.Index, snapSuffix)
-	// TODO(xiangli): make raft.Snapshot a protobuf type
-	b, err := json.Marshal(snapshot)
+	b, err := snapshot.Marshal()
 	if err != nil {
 		panic(err)
 	}
@@ -95,7 +93,7 @@ func loadSnap(dir, name string) (*raft.Snapshot, error) {
 	}
 
 	var snap raft.Snapshot
-	if err = json.Unmarshal(serializedSnap.Data, &snap); err != nil {
+	if err = snap.Unmarshal(serializedSnap.Data); err != nil {
 		log.Printf("Corrupted snapshot file %v: %v", name, err)
 		return nil, err
 	}

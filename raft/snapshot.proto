@@ -1,0 +1,16 @@
+package raft;
+
+import "code.google.com/p/gogoprotobuf/gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.sizer_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+option (gogoproto.goproto_getters_all) = false;
+
+message Snapshot {
+	required int64 ClusterId = 1 [(gogoproto.nullable) = false];
+	optional bytes Data = 2;
+	repeated int64 Nodes = 3;
+	required int64 Index = 4 [(gogoproto.nullable) = false];
+	required int64 Term = 5 [(gogoproto.nullable) = false];
+}
