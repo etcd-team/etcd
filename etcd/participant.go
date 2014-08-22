@@ -22,12 +22,15 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
+	"os"
 	"path"
 	"time"
 
 	"github.com/coreos/etcd/conf"
 	etcdErr "github.com/coreos/etcd/error"
 	"github.com/coreos/etcd/raft"
+	"github.com/coreos/etcd/snap"
 	"github.com/coreos/etcd/store"
 	"github.com/coreos/etcd/wal"
 )
@@ -35,7 +38,6 @@ import (
 const (
 	defaultHeartbeat = 1
 	defaultElection  = 5
-	defaultCompact   = 10000
 
 	maxBufferedProposal = 128
 
@@ -56,6 +58,8 @@ const (
 )
 
 var (
+	defaultCompact = 10000
+
 	tmpErr      = fmt.Errorf("try again")
 	stopErr     = fmt.Errorf("server is stopped")
 	raftStopErr = fmt.Errorf("raft is stopped")
@@ -79,6 +83,7 @@ type participant struct {
 	store.Store
 	rh          *raftHandler
 	w           *wal.WAL
+	snapshotter *snap.Snapshotter
 	serverStats *raftServerStats
 
 	stopNotifyc chan struct{}
@@ -111,14 +116,30 @@ func newParticipant(c *conf.Config, client *v2client, peerHub *peerHub, tickDura
 	p.rh = newRaftHandler(peerHub, p.Store.Version(), p.serverStats)
 	p.peerHub.setServerStats(p.serverStats)
 
-	walPath := p.cfg.DataDir
+	snapDir := path.Join(p.cfg.DataDir, "snap")
+	if err := os.Mkdir(snapDir, 0700); err != nil {
+		if !os.IsExist(err) {
+			log.Printf("id=%x participant.new.mkdir err=%v", p.id, err)
+			return nil, err
+		}
+	}
+	p.snapshotter = snap.New(snapDir)
+
+	walDir := path.Join(p.cfg.DataDir, "wal")
+	if err := os.Mkdir(walDir, 0700); err != nil {
+		if !os.IsExist(err) {
+			log.Printf("id=%x participant.new.mkdir err=%v", p.id, err)
+			return nil, err
+		}
+	}
+
 	var w *wal.WAL
 	var err error
-	if !wal.Exist(walPath) {
+	if !wal.Exist(walDir) {
 		p.id = genId()
 		p.pubAddr = c.Addr
 		p.raftPubAddr = c.Peer.Addr
-		if w, err = wal.Create(walPath); err != nil {
+		if w, err = wal.Create(walDir); err != nil {
 			return nil, err
 		}
 		p.node.Node = raft.New(p.id, defaultHeartbeat, defaultElection)
@@ -126,17 +147,48 @@ func newParticipant(c *conf.Config, client *v2client, peerHub *peerHub, tickDura
 		if err = w.SaveInfo(&info); err != nil {
 			return nil, err
 		}
-		log.Printf("id=%x participant.new path=%s\n", p.id, walPath)
+		log.Printf("id=%x participant.new path=%s\n", p.id, walDir)
 	} else {
-		n, err := wal.Read(walPath, 0)
+		s, err := p.snapshotter.Load()
+		if err != nil && err != snap.ErrNoSnapshot {
+			log.Printf("id=%x participant.snapload err=%s\n", p.id, err)
+			return nil, err
+		}
+		var snapIndex int64
+		if s != nil {
+			if err := p.Recovery(s.Data); err != nil {
+				panic(err)
+			}
+			log.Printf("id=%x participant.store.recovered index=%d\n", p.id, s.Index)
+
+			for _, node := range s.Nodes {
+				pp := path.Join(v2machineKVPrefix, fmt.Sprint(node))
+				ev, err := p.Store.Get(pp, false, false)
+				if err != nil {
+					panic(err)
+				}
+				q, err := url.ParseQuery(*ev.Node.Value)
+				if err != nil {
+					panic(err)
+				}
+				peer, err := p.peerHub.add(node, q["raft"][0])
+				if err != nil {
+					panic(err)
+				}
+				peer.participate()
+			}
+
+			snapIndex = s.Index
+		}
+		n, err := wal.Read(walDir, snapIndex)
 		if err != nil {
 			return nil, err
 		}
 		p.id = n.Id
-		p.node.Node = raft.Recover(n.Id, n.Ents, n.State, defaultHeartbeat, defaultElection)
+		p.node.Node = raft.Recover(n.Id, s, n.Ents, n.State, defaultHeartbeat, defaultElection)
 		p.apply(p.node.Next())
-		log.Printf("id=%x participant.load path=%s state=\"%+v\" len(ents)=%d", p.id, walPath, n.State, len(n.Ents))
-		if w, err = wal.Open(walPath); err != nil {
+		log.Printf("id=%x participant.load path=%s snapIndex=%d state=\"%+v\" len(ents)=%d", p.id, p.cfg.DataDir, snapIndex, n.State, len(n.Ents))
+		if w, err = wal.Open(walDir); err != nil {
 			return nil, err
 		}
 	}
@@ -236,7 +288,24 @@ func (p *participant) run(stop chan struct{}) {
 				panic(err)
 			}
 			p.node.Compact(d)
-			log.Printf("id=%x compacted index=\n", p.id)
+			snap := p.node.GetSnap()
+			log.Printf("id=%x compacted index=%d", p.id, snap.Index)
+			if err := p.snapshotter.Save(&snap); err != nil {
+				log.Printf("id=%d snapshot err=%v", p.id, err)
+				// todo(xiangli): consume the error?
+				panic(err)
+			}
+			if err := p.w.Cut(p.node.Index()); err != nil {
+				log.Printf("id=%d wal.cut err=%v", p.id, err)
+				// todo(xiangli): consume the error?
+				panic(err)
+			}
+			info := p.node.Info()
+			if err = p.w.SaveInfo(&info); err != nil {
+				log.Printf("id=%d wal.saveInfo err=%v", p.id, err)
+				// todo(xiangli): consume the error?
+				panic(err)
+			}
 		}
 	}
 }
