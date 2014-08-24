@@ -49,17 +49,13 @@ func (p *participant) serveMachines(w http.ResponseWriter, r *http.Request) erro
 	if r.Method != "GET" {
 		return allow(w, "GET")
 	}
-	v, err := p.Store.Get(v2machineKVPrefix, false, false)
+	ms, err := p.allMachineMessages()
 	if err != nil {
 		panic(err)
 	}
-	ns := make([]string, len(v.Node.Nodes))
-	for i, n := range v.Node.Nodes {
-		m, err := url.ParseQuery(*n.Value)
-		if err != nil {
-			continue
-		}
-		ns[i] = m["etcd"][0]
+	ns := make([]string, len(ms))
+	for i, m := range ms {
+		ns[i] = m.ClientURL
 	}
 	w.Write([]byte(strings.Join(ns, ",")))
 	return nil
@@ -147,12 +143,8 @@ func (p *participant) redirect(w http.ResponseWriter, r *http.Request, id int64)
 		return fmt.Errorf("redirect cannot find node %d", id)
 	}
 
-	m, err := url.ParseQuery(*e.Node.Value)
-	if err != nil {
-		return fmt.Errorf("failed to parse node entry: %s", *e.Node.Value)
-	}
-
-	redirectAddr, err := buildRedirectURL(m["etcd"][0], r.URL)
+	m := newMachineMessage(e.Node, p.node.Leader())
+	redirectAddr, err := buildRedirectURL(m.ClientURL, r.URL)
 	if err != nil {
 		return err
 	}

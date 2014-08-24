@@ -205,8 +205,7 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 
 	for i := 0; i < cl.Size; i++ {
 		for j := 0; j < cl.Size; j++ {
-			name := fmt.Sprint(cl.Id(i))
-			r, err := http.Get(cl.URL(j) + v2adminMachinesPrefix + name)
+			r, err := http.Get(cl.URL(j) + v2adminMachinesPrefix + fmt.Sprint(cl.Id(i)))
 			if err != nil {
 				t.Errorf("%v", err)
 				continue
@@ -226,7 +225,8 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 				continue
 			}
 			wm := &machineMessage{
-				Name:      name,
+				Name:      fmt.Sprint("testServer-", i),
+				Id:        cl.Id(i),
 				State:     stateFollower,
 				ClientURL: cl.URL(i),
 				PeerURL:   cl.URL(i),
@@ -250,7 +250,8 @@ func TestGetAdminMachinesEndPoint(t *testing.T) {
 	w := make([]*machineMessage, cl.Size)
 	for i := 0; i < cl.Size; i++ {
 		w[i] = &machineMessage{
-			Name:      fmt.Sprint(cl.Id(i)),
+			Name:      fmt.Sprint("testServer-", i),
+			Id:        cl.Id(i),
 			State:     stateFollower,
 			ClientURL: cl.URL(i),
 			PeerURL:   cl.URL(i),

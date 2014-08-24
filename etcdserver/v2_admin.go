@@ -18,9 +18,7 @@ package etcdserver
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,6 +36,7 @@ const (
 // machineMessage represents information about a peer or standby in the registry.
 type machineMessage struct {
 	Name      string `json:"name"`
+	Id        int64  `json:"id"`
 	State     string `json:"state"`
 	ClientURL string `json:"clientURL"`
 	PeerURL   string `json:"peerURL"`
@@ -46,6 +45,7 @@ type machineMessage struct {
 type context struct {
 	MinVersion int    `json:"minVersion"`
 	MaxVersion int    `json:"maxVersion"`
+	Name       string `json:"name"`
 	ClientURL  string `json:"clientURL"`
 	PeerURL    string `json:"peerURL"`
 }
@@ -75,13 +75,13 @@ func (p *participant) serveAdminConfig(w http.ResponseWriter, r *http.Request) e
 }
 
 func (p *participant) serveAdminMachines(w http.ResponseWriter, r *http.Request) error {
-	name := strings.TrimPrefix(r.URL.Path, v2adminMachinesPrefix)
+	idStr := strings.TrimPrefix(r.URL.Path, v2adminMachinesPrefix)
 	switch r.Method {
 	case "GET":
 		var info interface{}
 		var err error
-		if name != "" {
-			info, err = p.someMachineMessage(name)
+		if idStr != "" {
+			info, err = p.someMachineMessage(idStr)
 		} else {
 			info, err = p.allMachineMessages()
 		}
@@ -94,7 +94,7 @@ func (p *participant) serveAdminMachines(w http.ResponseWriter, r *http.Request)
 		if !p.node.IsLeader() {
 			return p.redirect(w, r, p.node.Leader())
 		}
-		id, err := strconv.ParseInt(name, 0, 64)
+		id, err := strconv.ParseInt(idStr, 0, 64)
 		if err != nil {
 			return err
 		}
@@ -102,12 +102,12 @@ func (p *participant) serveAdminMachines(w http.ResponseWriter, r *http.Request)
 		if err := json.NewDecoder(r.Body).Decode(info); err != nil {
 			return err
 		}
-		return p.add(id, info.PeerURL, info.ClientURL)
+		return p.add(&machineMessage{Name: info.Name, Id: id, PeerURL: info.PeerURL, ClientURL: info.ClientURL})
 	case "DELETE":
 		if !p.node.IsLeader() {
 			return p.redirect(w, r, p.node.Leader())
 		}
-		id, err := strconv.ParseInt(name, 0, 64)
+		id, err := strconv.ParseInt(idStr, 0, 64)
 		if err != nil {
 			return err
 		}
@@ -140,14 +140,13 @@ func (p *participant) setClusterConfig(c *conf.ClusterConfig) error {
 }
 
 // someMachineMessage return machine message of specified name.
-func (p *participant) someMachineMessage(name string) (*machineMessage, error) {
-	pp := filepath.Join(v2machineKVPrefix, name)
+func (p *participant) someMachineMessage(idStr string) (*machineMessage, error) {
+	pp := filepath.Join(v2machineKVPrefix, idStr)
 	e, err := p.Store.Get(pp, false, false)
 	if err != nil {
 		return nil, err
 	}
-	lead := fmt.Sprint(p.node.Leader())
-	return newMachineMessage(e.Node, lead), nil
+	return newMachineMessage(e.Node, p.node.Leader()), nil
 }
 
 func (p *participant) allMachineMessages() ([]*machineMessage, error) {
@@ -155,7 +154,7 @@ func (p *participant) allMachineMessages() ([]*machineMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	lead := fmt.Sprint(p.node.Leader())
+	lead := p.node.Leader()
 	ms := make([]*machineMessage, len(e.Node.Nodes))
 	for i, n := range e.Node.Nodes {
 		ms[i] = newMachineMessage(n, lead)
@@ -163,20 +162,15 @@ func (p *participant) allMachineMessages() ([]*machineMessage, error) {
 	return ms, nil
 }
 
-func newMachineMessage(n *store.NodeExtern, lead string) *machineMessage {
-	_, name := filepath.Split(n.Key)
-	q, err := url.ParseQuery(*n.Value)
-	if err != nil {
-		panic("fail to parse the info for machine " + name)
+func newMachineMessage(n *store.NodeExtern, lead int64) *machineMessage {
+	m := new(machineMessage)
+	if err := json.Unmarshal([]byte(*n.Value), m); err != nil {
+		panic(err)
 	}
-	m := &machineMessage{
-		Name:      name,
-		State:     stateFollower,
-		ClientURL: q["etcd"][0],
-		PeerURL:   q["raft"][0],
-	}
-	if name == lead {
+	if lead == m.Id {
 		m.State = stateLeader
+	} else {
+		m.State = stateFollower
 	}
 	return m
 }
