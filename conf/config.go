@@ -57,9 +57,8 @@ type Config struct {
 		HeartbeatInterval int    `env:"ETCD_PEER_HEARTBEAT_INTERVAL"`
 		ElectionTimeout   int    `env:"ETCD_PEER_ELECTION_TIMEOUT"`
 	}
-	strTrace     string `env:"ETCD_TRACE"`
-	GraphiteHost string `env:"ETCD_GRAPHITE_HOST"`
-	Cluster      struct {
+	strTrace string `env:"ETCD_TRACE"`
+	Cluster  struct {
 		ActiveSize   int     `env:"ETCD_CLUSTER_ACTIVE_SIZE"`
 		RemoveDelay  float64 `env:"ETCD_CLUSTER_REMOVE_DELAY"`
 		SyncInterval float64 `env:"ETCD_CLUSTER_SYNC_INTERVAL"`
@@ -221,7 +220,6 @@ func (c *Config) LoadFlags(arguments []string) error {
 	f.StringVar(&c.CPUProfileFile, "cpuprofile", "", "")
 
 	f.StringVar(&c.strTrace, "trace", "", "")
-	f.StringVar(&c.GraphiteHost, "graphite-host", "", "")
 
 	f.IntVar(&c.Cluster.ActiveSize, "cluster-active-size", c.Cluster.ActiveSize, "")
 	f.Float64Var(&c.Cluster.RemoveDelay, "cluster-remove-delay", c.Cluster.RemoveDelay, "")
