@@ -49,17 +49,10 @@ func (p *participant) serveMachines(w http.ResponseWriter, r *http.Request) erro
 	if r.Method != "GET" {
 		return allow(w, "GET")
 	}
-	v, err := p.Store.Get(v2machineKVPrefix, false, false)
-	if err != nil {
-		panic(err)
-	}
-	ns := make([]string, len(v.Node.Nodes))
-	for i, n := range v.Node.Nodes {
-		m, err := url.ParseQuery(*n.Value)
-		if err != nil {
-			continue
-		}
-		ns[i] = m["etcd"][0]
+	mis := p.readAllMachineInfos()
+	ns := make([]string, len(mis))
+	for i, mi := range mis {
+		ns[i] = mi.ClientURL
 	}
 	w.Write([]byte(strings.Join(ns, ",")))
 	return nil
@@ -142,17 +135,11 @@ func (w *HEADResponseWriter) Write([]byte) (int, error) {
 }
 
 func (p *participant) redirect(w http.ResponseWriter, r *http.Request, id int64) error {
-	e, err := p.Store.Get(fmt.Sprintf("%v/%d", v2machineKVPrefix, p.node.Leader()), false, false)
-	if err != nil {
+	ma := p.readMachineAttribute(p.node.Leader())
+	if ma == nil {
 		return fmt.Errorf("redirect cannot find node %d", id)
 	}
-
-	m, err := url.ParseQuery(*e.Node.Value)
-	if err != nil {
-		return fmt.Errorf("failed to parse node entry: %s", *e.Node.Value)
-	}
-
-	redirectAddr, err := buildRedirectURL(m["etcd"][0], r.URL)
+	redirectAddr, err := buildRedirectURL(ma.ClientURL, r.URL)
 	if err != nil {
 		return err
 	}

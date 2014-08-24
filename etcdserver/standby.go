@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -123,11 +122,7 @@ func (s *standby) syncCluster(nodes map[string]bool) (map[string]bool, error) {
 		for _, machine := range machines {
 			nn[machine.PeerURL] = true
 			if machine.State == stateLeader {
-				id, err := strconv.ParseInt(machine.Name, 0, 64)
-				if err != nil {
-					return nil, err
-				}
-				s.setLeaderInfo(id, machine.PeerURL)
+				s.setLeaderInfo(machine.Id, machine.PeerURL)
 			}
 		}
 		s.clusterConf = cfg

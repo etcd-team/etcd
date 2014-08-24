@@ -22,7 +22,6 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"time"
@@ -69,6 +68,7 @@ type participant struct {
 	id           int64
 	clusterId    int64
 	cfg          *conf.Config
+	name         string
 	pubAddr      string
 	raftPubAddr  string
 	tickDuration time.Duration
@@ -137,6 +137,7 @@ func newParticipant(c *conf.Config, client *v2client, peerHub *peerHub, tickDura
 	var err error
 	if !wal.Exist(walDir) {
 		p.id = genId()
+		p.name = c.Name
 		p.pubAddr = c.Addr
 		p.raftPubAddr = c.Peer.Addr
 		if w, err = wal.Create(walDir); err != nil {
@@ -162,19 +163,9 @@ func newParticipant(c *conf.Config, client *v2client, peerHub *peerHub, tickDura
 			}
 			log.Printf("participant.store.recovered index=%d\n", s.Index)
 
-			for _, node := range s.Nodes {
-				pp := path.Join(v2machineKVPrefix, fmt.Sprint(node))
-				ev, err := p.Store.Get(pp, false, false)
-				if err != nil {
-					log.Printf("store.get err=%v", err)
-					return nil, err
-				}
-				q, err := url.ParseQuery(*ev.Node.Value)
-				if err != nil {
-					log.Printf("url.parse err=%v", err)
-					return nil, err
-				}
-				peer, err := p.peerHub.add(node, q["raft"][0])
+			for _, id := range s.Nodes {
+				ma := p.readMachineAttribute(id)
+				peer, err := p.peerHub.add(id, ma.PeerURL)
 				if err != nil {
 					log.Printf("peerHub.add err=%v", err)
 					return nil, err
@@ -222,7 +213,11 @@ func (p *participant) run(stop chan struct{}) error {
 			log.Printf("id=%x participant.run action=bootstrap\n", p.id)
 			p.node.Campaign()
 			p.node.InitCluster(genId())
-			p.node.Add(p.id, p.raftPubAddr, []byte(p.pubAddr))
+			b, err := json.Marshal(machineAttribute{Name: p.name, ClientURL: p.pubAddr, PeerURL: p.raftPubAddr})
+			if err != nil {
+				panic(err)
+			}
+			p.node.Add(p.id, p.raftPubAddr, b)
 			p.apply(p.node.Next())
 		} else {
 			log.Printf("id=%x participant.run action=join seeds=\"%v\"\n", p.id, seeds)
@@ -325,8 +320,8 @@ func (p *participant) raftHandler() http.Handler {
 	return p.rh
 }
 
-func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
-	log.Printf("id=%x participant.add nodeId=%x raftPubAddr=%s pubAddr=%s\n", p.id, id, raftPubAddr, pubAddr)
+func (p *participant) add(id int64, ma *machineAttribute) error {
+	log.Printf("id=%x participant.add addId=%x machine=%+v\n", p.id, id, ma)
 	pp := path.Join(v2machineKVPrefix, fmt.Sprint(id))
 
 	_, err := p.Store.Get(pp, false, false)
@@ -344,8 +339,12 @@ func (p *participant) add(id int64, raftPubAddr string, pubAddr string) error {
 		return tmpErr
 	}
 
+	b, err := json.Marshal(ma)
+	if err != nil {
+		panic(err)
+	}
 	select {
-	case p.addNodeC <- raft.Config{NodeId: id, Addr: raftPubAddr, Context: []byte(pubAddr)}:
+	case p.addNodeC <- raft.Config{NodeId: id, Addr: ma.PeerURL, Context: b}:
 	default:
 		w.Remove()
 		log.Printf("id=%x participant.add proposeErr=\"unable to send out addNode proposal\"\n", p.id)
@@ -434,15 +433,12 @@ func (p *participant) apply(ents []raft.Entry) {
 			}
 			peer, err := p.peerHub.add(cfg.NodeId, cfg.Addr)
 			if err != nil {
-				log.Printf("id=%x participant.cluster.addNode peerAddErr=\"%v\"\n", p.id, err)
+				log.Fatalf("id=%x participant.cluster.addNode peerAddErr=%q", p.id, err)
 				break
 			}
 			peer.participate()
-			p.Store.Set(pp, false, fmt.Sprintf("raft=%v&etcd=%v", cfg.Addr, string(cfg.Context)), store.Permanent)
-			if p.id == cfg.NodeId {
-				p.raftPubAddr = cfg.Addr
-				p.pubAddr = string(cfg.Context)
-			}
+			p.Store.Set(pp, false, string(cfg.Context), store.Permanent)
+			// TODO: check validity of pubAddr and raftPubAddr
 			log.Printf("id=%x participant.cluster.addNode nodeId=%x addr=%s context=%s\n", p.id, cfg.NodeId, cfg.Addr, cfg.Context)
 		case raft.RemoveNode:
 			cfg := new(raft.Config)
@@ -452,7 +448,7 @@ func (p *participant) apply(ents []raft.Entry) {
 			}
 			peer, err := p.peerHub.peer(cfg.NodeId)
 			if err != nil {
-				log.Fatal("id=%x participant.apply getPeerErr=\"%v\"", p.id, err)
+				log.Fatalf("id=%x participant.cluster.removeNode getPeerErr=%q", p.id, err)
 			}
 			peer.idle()
 			pp := path.Join(v2machineKVPrefix, fmt.Sprint(cfg.NodeId))
@@ -493,17 +489,16 @@ func (p *participant) send(msgs []raft.Message) {
 }
 
 func (p *participant) join() error {
-	info := &context{
-		MinVersion: store.MinVersion(),
-		MaxVersion: store.MaxVersion(),
-		ClientURL:  p.pubAddr,
-		PeerURL:    p.raftPubAddr,
+	ma := &machineAttribute{
+		Name:      p.name,
+		ClientURL: p.pubAddr,
+		PeerURL:   p.raftPubAddr,
 	}
 
 	max := p.cfg.MaxRetryAttempts
 	for attempt := 0; ; attempt++ {
 		for seed := range p.peerHub.getSeeds() {
-			if err := p.client.AddMachine(seed, fmt.Sprint(p.id), info); err == nil {
+			if err := p.client.AddMachine(seed, fmt.Sprint(p.id), ma); err == nil {
 				return nil
 			} else {
 				log.Printf("id=%x participant.join addMachineErr=\"%v\"\n", p.id, err)

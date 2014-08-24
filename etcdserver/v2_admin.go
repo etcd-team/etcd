@@ -20,12 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
-	"path/filepath"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/coreos/etcd/conf"
+	etcdErr "github.com/coreos/etcd/error"
 	"github.com/coreos/etcd/store"
 )
 
@@ -35,19 +35,19 @@ const (
 	stateLeader    = "leader"
 )
 
-// machineMessage represents information about a peer or standby in the registry.
-type machineMessage struct {
+// machineInfo represents information about a peer or standby in the registry.
+type machineInfo struct {
 	Name      string `json:"name"`
+	Id        int64  `json:"id"`
 	State     string `json:"state"`
 	ClientURL string `json:"clientURL"`
 	PeerURL   string `json:"peerURL"`
 }
 
-type context struct {
-	MinVersion int    `json:"minVersion"`
-	MaxVersion int    `json:"maxVersion"`
-	ClientURL  string `json:"clientURL"`
-	PeerURL    string `json:"peerURL"`
+type machineAttribute struct {
+	Name      string `json:"name"`
+	ClientURL string `json:"clientURL"`
+	PeerURL   string `json:"peerURL"`
 }
 
 func (p *participant) serveAdminConfig(w http.ResponseWriter, r *http.Request) error {
@@ -75,18 +75,21 @@ func (p *participant) serveAdminConfig(w http.ResponseWriter, r *http.Request) e
 }
 
 func (p *participant) serveAdminMachines(w http.ResponseWriter, r *http.Request) error {
-	name := strings.TrimPrefix(r.URL.Path, v2adminMachinesPrefix)
+	idStr := strings.TrimPrefix(r.URL.Path, v2adminMachinesPrefix)
 	switch r.Method {
 	case "GET":
 		var info interface{}
-		var err error
-		if name != "" {
-			info, err = p.someMachineMessage(name)
+		if idStr != "" {
+			id, err := strconv.ParseInt(idStr, 0, 64)
+			if err != nil {
+				return err
+			}
+			info = p.readMachineInfo(id, p.node.Leader())
 		} else {
-			info, err = p.allMachineMessages()
+			info = p.readAllMachineInfos()
 		}
-		if err != nil {
-			return err
+		if info == nil {
+			return fmt.Errorf("nonexist")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(info)
@@ -94,20 +97,20 @@ func (p *participant) serveAdminMachines(w http.ResponseWriter, r *http.Request)
 		if !p.node.IsLeader() {
 			return p.redirect(w, r, p.node.Leader())
 		}
-		id, err := strconv.ParseInt(name, 0, 64)
+		id, err := strconv.ParseInt(idStr, 0, 64)
 		if err != nil {
 			return err
 		}
-		info := &context{}
-		if err := json.NewDecoder(r.Body).Decode(info); err != nil {
+		ma := &machineAttribute{}
+		if err := json.NewDecoder(r.Body).Decode(ma); err != nil {
 			return err
 		}
-		return p.add(id, info.PeerURL, info.ClientURL)
+		return p.add(id, ma)
 	case "DELETE":
 		if !p.node.IsLeader() {
 			return p.redirect(w, r, p.node.Leader())
 		}
-		id, err := strconv.ParseInt(name, 0, 64)
+		id, err := strconv.ParseInt(idStr, 0, 64)
 		if err != nil {
 			return err
 		}
@@ -139,44 +142,56 @@ func (p *participant) setClusterConfig(c *conf.ClusterConfig) error {
 	return nil
 }
 
-// someMachineMessage return machine message of specified name.
-func (p *participant) someMachineMessage(name string) (*machineMessage, error) {
-	pp := filepath.Join(v2machineKVPrefix, name)
-	e, err := p.Store.Get(pp, false, false)
+func (p *participant) readAllMachineInfos() []*machineInfo {
+	ev, err := p.Store.Get(v2machineKVPrefix, false, false)
 	if err != nil {
-		return nil, err
+		if e, ok := err.(*etcdErr.Error); !ok || e.ErrorCode != etcdErr.EcodeKeyNotFound {
+			panic(err.Error())
+		}
+		return nil
 	}
-	lead := fmt.Sprint(p.node.Leader())
-	return newMachineMessage(e.Node, lead), nil
+	lead := p.node.Leader()
+	mis := make([]*machineInfo, len(ev.Node.Nodes))
+	for i, n := range ev.Node.Nodes {
+		id, err := strconv.ParseInt(path.Base(n.Key), 0, 64)
+		if err != nil {
+			panic(err.Error())
+		}
+		mis[i] = p.readMachineInfo(id, lead)
+	}
+	return mis
 }
 
-func (p *participant) allMachineMessages() ([]*machineMessage, error) {
-	e, err := p.Store.Get(v2machineKVPrefix, false, false)
-	if err != nil {
-		return nil, err
+func (p *participant) readMachineInfo(id int64, lead int64) *machineInfo {
+	ma := p.readMachineAttribute(id)
+	if ma == nil {
+		return nil
 	}
-	lead := fmt.Sprint(p.node.Leader())
-	ms := make([]*machineMessage, len(e.Node.Nodes))
-	for i, n := range e.Node.Nodes {
-		ms[i] = newMachineMessage(n, lead)
+	mi := &machineInfo{
+		Name:      ma.Name,
+		Id:        id,
+		ClientURL: ma.ClientURL,
+		PeerURL:   ma.PeerURL,
 	}
-	return ms, nil
+	if lead == id {
+		mi.State = stateLeader
+	} else {
+		mi.State = stateFollower
+	}
+	return mi
 }
 
-func newMachineMessage(n *store.NodeExtern, lead string) *machineMessage {
-	_, name := filepath.Split(n.Key)
-	q, err := url.ParseQuery(*n.Value)
+func (p *participant) readMachineAttribute(id int64) *machineAttribute {
+	ev, err := p.Store.Get(path.Join(v2machineKVPrefix, fmt.Sprint(id)), false, false)
 	if err != nil {
-		panic("fail to parse the info for machine " + name)
+		if e, ok := err.(*etcdErr.Error); !ok || e.ErrorCode != etcdErr.EcodeKeyNotFound {
+			panic(err.Error())
+		}
+		return nil
 	}
-	m := &machineMessage{
-		Name:      name,
-		State:     stateFollower,
-		ClientURL: q["etcd"][0],
-		PeerURL:   q["raft"][0],
+	ma := new(machineAttribute)
+	if err := json.Unmarshal([]byte(*ev.Node.Value), ma); err != nil {
+		panic(err)
 	}
-	if name == lead {
-		m.State = stateLeader
-	}
-	return m
+	return ma
 }

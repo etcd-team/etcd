@@ -1267,48 +1267,52 @@ you can find and remove machines.
 First, list all the machines in the cluster.
 
 ```sh
-curl -L http://127.0.0.1:7001/v2/admin/machines
+curl -L http://127.0.0.1:7001/v2/admin/machines/
 ```
 ```json
 [
     {
-        "clientURL": "http://127.0.0.1:4001",
         "name": "peer1",
-        "peerURL": "http://127.0.0.1:7001",
-        "state": "leader"
+        "id": 5475924762705024841,
+        "state": "leader",
+        "clientURL": "http://127.0.0.1:4001",
+        "peerURL": "http://127.0.0.1:7001"
     },
     {
-        "clientURL": "http://127.0.0.1:4002",
         "name": "peer2",
-        "peerURL": "http://127.0.0.1:7002",
-        "state": "follower"
+        "id": 8303651007362046194,
+        "state": "follower",
+        "clientURL": "http://127.0.0.1:4002",
+        "peerURL": "http://127.0.0.1:7002"
     },
     {
-        "clientURL": "http://127.0.0.1:4003",
         "name": "peer3",
-        "peerURL": "http://127.0.0.1:7003",
-        "state": "follower"
+        "id": 7919629212745556859,
+        "state": "follower",
+        "clientURL": "http://127.0.0.1:4003",
+        "peerURL": "http://127.0.0.1:7003"
     }
 ]
 ```
 
-Then take a closer look at the machine you want to remove.
+Then take a closer look at the machine you want to remove using its id.
 
 ```sh
-curl -L http://127.0.0.1:7001/v2/admin/machines/peer2
+curl -L http://127.0.0.1:7001/v2/admin/machines/8303651007362046194
 ```
 
 ```json
 {
-    "clientURL": "http://127.0.0.1:4002",
     "name": "peer2",
-    "peerURL": "http://127.0.0.1:7002",
-    "state": "follower"
+    "id": 8303651007362046194,
+    "state": "follower",
+    "clientURL": "http://127.0.0.1:4002",
+    "peerURL": "http://127.0.0.1:7002"
 }
 ```
 
 And finally remove it.
 
 ```sh
-curl -L -XDELETE http://127.0.0.1:7001/v2/admin/machines/peer2
+curl -L -XDELETE http://127.0.0.1:7001/v2/admin/machines/8303651007362046194
 ```

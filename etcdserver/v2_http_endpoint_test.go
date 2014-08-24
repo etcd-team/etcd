@@ -205,8 +205,7 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 
 	for i := 0; i < cl.Size; i++ {
 		for j := 0; j < cl.Size; j++ {
-			name := fmt.Sprint(cl.Id(i))
-			r, err := http.Get(cl.URL(j) + v2adminMachinesPrefix + name)
+			r, err := http.Get(cl.URL(j) + v2adminMachinesPrefix + fmt.Sprint(cl.Id(i)))
 			if err != nil {
 				t.Errorf("%v", err)
 				continue
@@ -218,15 +217,16 @@ func TestGetAdminMachineEndPoint(t *testing.T) {
 				t.Errorf("#%d on %d: ContentType = %s, want application/json", i, j, g)
 			}
 
-			m := new(machineMessage)
+			m := new(machineInfo)
 			err = json.NewDecoder(r.Body).Decode(m)
 			r.Body.Close()
 			if err != nil {
 				t.Errorf("%v", err)
 				continue
 			}
-			wm := &machineMessage{
-				Name:      name,
+			wm := &machineInfo{
+				Name:      fmt.Sprint("testServer-", i),
+				Id:        cl.Id(i),
 				State:     stateFollower,
 				ClientURL: cl.URL(i),
 				PeerURL:   cl.URL(i),
@@ -247,10 +247,11 @@ func TestGetAdminMachinesEndPoint(t *testing.T) {
 	cl := &testCluster{Size: 3}
 	cl.Start()
 
-	w := make([]*machineMessage, cl.Size)
+	w := make([]*machineInfo, cl.Size)
 	for i := 0; i < cl.Size; i++ {
-		w[i] = &machineMessage{
-			Name:      fmt.Sprint(cl.Id(i)),
+		w[i] = &machineInfo{
+			Name:      fmt.Sprint("testServer-", i),
+			Id:        cl.Id(i),
 			State:     stateFollower,
 			ClientURL: cl.URL(i),
 			PeerURL:   cl.URL(i),
@@ -264,7 +265,7 @@ func TestGetAdminMachinesEndPoint(t *testing.T) {
 			t.Errorf("%v", err)
 			continue
 		}
-		m := make([]*machineMessage, 0)
+		m := make([]*machineInfo, 0)
 		err = json.NewDecoder(r.Body).Decode(&m)
 		r.Body.Close()
 		if err != nil {
@@ -286,7 +287,7 @@ func TestGetAdminMachinesEndPoint(t *testing.T) {
 }
 
 // int64Slice implements sort interface
-type machineSlice []*machineMessage
+type machineSlice []*machineInfo
 
 func (s machineSlice) Len() int           { return len(s) }
 func (s machineSlice) Less(i, j int) bool { return s[i].Name < s[j].Name }

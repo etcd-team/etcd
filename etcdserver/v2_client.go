@@ -101,7 +101,7 @@ func (c *v2client) GetVersion(url string) (int, *etcdErr.Error) {
 	return version, nil
 }
 
-func (c *v2client) GetMachines(url string) ([]*machineMessage, *etcdErr.Error) {
+func (c *v2client) GetMachines(url string) ([]*machineInfo, *etcdErr.Error) {
 	if c.runOne() == false {
 		return nil, clientError(errors.New("v2_client is stopped"))
 	}
@@ -115,7 +115,7 @@ func (c *v2client) GetMachines(url string) ([]*machineMessage, *etcdErr.Error) {
 		return nil, c.readErrorBody(resp.Body)
 	}
 
-	msgs := new([]*machineMessage)
+	msgs := new([]*machineInfo)
 	if uerr := c.readJSONBody(resp.Body, msgs); uerr != nil {
 		return nil, uerr
 	}
@@ -145,13 +145,13 @@ func (c *v2client) GetClusterConfig(url string) (*conf.ClusterConfig, *etcdErr.E
 
 // AddMachine adds machine to the cluster.
 // The first return value is the commit index of join command.
-func (c *v2client) AddMachine(url string, name string, info *context) *etcdErr.Error {
+func (c *v2client) AddMachine(url string, name string, ma *machineAttribute) *etcdErr.Error {
 	if c.runOne() == false {
 		return clientError(errors.New("v2_client is stopped"))
 	}
 	defer c.finishOne()
 
-	b, _ := json.Marshal(info)
+	b, _ := json.Marshal(ma)
 	url = url + "/v2/admin/machines/" + name
 
 	resp, err := c.put(url, b)
