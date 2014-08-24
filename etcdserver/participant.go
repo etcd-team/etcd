@@ -58,8 +58,6 @@ const (
 )
 
 var (
-	defaultCompact = 10000
-
 	tmpErr      = fmt.Errorf("try again")
 	stopErr     = fmt.Errorf("server is stopped")
 	raftStopErr = fmt.Errorf("raft is stopped")
@@ -289,7 +287,7 @@ func (p *participant) run(stop chan struct{}) error {
 			log.Printf("id=%x participant.end\n", p.id)
 			return nil
 		}
-		if p.node.EntsLen() > defaultCompact {
+		if p.node.EntsLen() > p.cfg.SnapshotCount {
 			d, err := p.Save()
 			if err != nil {
 				log.Printf("id=%x participant.compact err=%q", p.id, err)
