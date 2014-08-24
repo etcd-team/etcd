@@ -26,11 +26,13 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coreos/etcd/conf"
+	etcdErr "github.com/coreos/etcd/error"
 	"github.com/coreos/etcd/store"
 )
 
@@ -135,7 +137,6 @@ func TestRemove(t *testing.T) {
 // TODO(yicheng) Add test for becoming standby
 // maxSize -> standby
 // auto-demote -> standby
-// remove -> standby
 
 func TestReleaseVersion(t *testing.T) {
 	defer afterTest(t)
@@ -350,6 +351,39 @@ func TestRestoreSnapshotFromDisk(t *testing.T) {
 	}
 }
 
+func TestBecomeStandbyByRemove(t *testing.T) {
+	defer afterTest(t)
+
+	cl := testCluster{Size: 5}
+	cl.Start()
+	defer cl.Destroy()
+
+	lead, _ := cl.Leader()
+	config := conf.NewClusterConfig()
+	config.ActiveSize = 0
+	if err := cl.Participant(lead).setClusterConfig(config); err != nil {
+		t.Fatalf("setClusterConfig err = %v", err)
+	}
+
+	rmIdx := 1
+	rmId := cl.Id(rmIdx)
+	if err := cl.Participant(lead).remove(rmId); err != nil {
+		t.Fatalf("remove err = %v", err)
+	}
+	cl.Node(rmIdx).WaitMode(standbyMode)
+
+	cl.Leader()
+	if g := cl.Standby(rmIdx).leader; g != cl.Id(lead) {
+		t.Errorf("lead = %x, want %x", g, cl.Id(lead))
+	}
+	if g := cl.Standby(rmIdx).leaderAddr; g != cl.URL(lead) {
+		t.Errorf("leadAddr = %x, want %x", g, cl.URL(lead))
+	}
+	if _, err := cl.Participant(lead).someMachineMessage(fmt.Sprint(rmId)); err == nil || err.(*etcdErr.Error).ErrorCode != etcdErr.EcodeKeyNotFound {
+		t.Errorf("getMachineErr = %v, want %v", err, etcdErr.EcodeKeyNotFound)
+	}
+}
+
 type testCluster struct {
 	Size int
 	TLS  bool
@@ -470,42 +504,42 @@ func (c *testCluster) Destroy() {
 func (c *testCluster) Leader() (leadIdx int, term int64) {
 	ids := make(map[int64]int)
 	for {
-		ls := make([]leadterm, 0, c.Size)
+		ls := make(leadterms, 0, c.Size)
 		for i := range c.nodes {
 			switch c.Node(i).e.mode.Get() {
 			case participantMode:
 				ls = append(ls, c.Node(i).Lead())
 				ids[c.Id(i)] = i
 			case standbyMode:
-				//TODO(xiangli) add standby support
+				ls = append(ls, leadterm{c.Standby(i).leader, 0})
 			case stopMode:
 			}
 		}
-		if isSameLead(ls) {
-			return ids[ls[0].lead], ls[0].term
+		if ls.Len() > 0 {
+			sort.Sort(ls)
+			if ls[0].lead != -1 && !ls.Less(0, ls.Len()-1) {
+				return ids[ls[0].lead], ls[0].term
+			}
 		}
+		// todo(xiangli): printout the current cluster status for debugging....
 		time.Sleep(c.Node(0).e.tickDuration * defaultElection)
 	}
 }
 
+type leadterms []leadterm
+
+func (ls leadterms) Len() int { return len(ls) }
+
+func (ls leadterms) Less(i, j int) bool {
+	lessTerm := ls[i].term != 0 && ls[j].term != 0 && ls[i].term < ls[j].term
+	return lessTerm || ls[i].lead < ls[j].lead
+}
+
+func (ls leadterms) Swap(i, j int) { ls[i], ls[j] = ls[j], ls[i] }
+
 type leadterm struct {
 	lead int64
 	term int64
-}
-
-func isSameLead(ls []leadterm) bool {
-	m := make(map[leadterm]int)
-	for i := range ls {
-		m[ls[i]] = m[ls[i]] + 1
-	}
-	if len(m) == 1 {
-		if ls[0].lead == -1 {
-			return false
-		}
-		return true
-	}
-	// todo(xiangli): printout the current cluster status for debugging....
-	return false
 }
 
 type testServer struct {
