@@ -382,6 +382,12 @@ func TestBecomeStandbyByRemove(t *testing.T) {
 	if _, err := cl.Participant(lead).someMachineMessage(fmt.Sprint(rmId)); err == nil || err.(*etcdErr.Error).ErrorCode != etcdErr.EcodeKeyNotFound {
 		t.Errorf("getMachineErr = %v, want %v", err, etcdErr.EcodeKeyNotFound)
 	}
+	if _, err := os.Stat(path.Join(cl.Node(rmIdx).Config.DataDir, "wal")); !os.IsNotExist(err) {
+		t.Errorf("walDirStat = %v, want %v", err, os.ErrNotExist)
+	}
+	if _, err := os.Stat(path.Join(cl.Node(rmIdx).Config.DataDir, "snap")); !os.IsNotExist(err) {
+		t.Errorf("snapDirStat = %v, want %v", err, os.ErrNotExist)
+	}
 }
 
 type testCluster struct {
