@@ -50,7 +50,6 @@ type peerHub struct {
 
 func newPeerHub(c *http.Client, followersStats *raftFollowersStats) *peerHub {
 	h := &peerHub{
-		peers:          make(map[int64]*peer),
 		seeds:          make(map[string]bool),
 		c:              c,
 		followersStats: followersStats,
@@ -82,6 +81,7 @@ func (h *peerHub) start() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.stopped = false
+	h.peers = make(map[int64]*peer)
 }
 
 func (h *peerHub) stop() {
@@ -91,7 +91,6 @@ func (h *peerHub) stop() {
 	for _, p := range h.peers {
 		p.stop()
 	}
-	h.peers = make(map[int64]*peer)
 	h.followersStats.Reset()
 	// http.Transport needs some time to put used connections
 	// into idle queues.

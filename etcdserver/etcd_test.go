@@ -360,6 +360,8 @@ func TestBecomeStandbyByRemove(t *testing.T) {
 
 	lead, _ := cl.Leader()
 	config := conf.NewClusterConfig()
+	// Turn off auto adjustment on cluster size,
+	// so standby will not join the cluster if it knows that the cluster has been full.
 	config.ActiveSize = -1
 	if err := cl.Participant(lead).setClusterConfig(config); err != nil {
 		t.Fatalf("setClusterConfig err = %v", err)
@@ -379,7 +381,7 @@ func TestBecomeStandbyByRemove(t *testing.T) {
 	if g := cl.Standby(rmIdx).leaderAddr; g != cl.URL(lead) {
 		t.Errorf("leadAddr = %x, want %x", g, cl.URL(lead))
 	}
-	if _, err := cl.Participant(lead).someMachineMessage(fmt.Sprint(rmId)); err == nil || err.(*etcdErr.Error).ErrorCode != etcdErr.EcodeKeyNotFound {
+	if _, err := cl.Participant(lead).machineMessage(fmt.Sprint(rmId)); err == nil || err.(*etcdErr.Error).ErrorCode != etcdErr.EcodeKeyNotFound {
 		t.Errorf("getMachineErr = %v, want %v", err, etcdErr.EcodeKeyNotFound)
 	}
 	if _, err := os.Stat(path.Join(cl.Node(rmIdx).Config.DataDir, "wal")); !os.IsNotExist(err) {
@@ -390,7 +392,7 @@ func TestBecomeStandbyByRemove(t *testing.T) {
 	}
 }
 
-func TestBecomeParticipantBySync(t *testing.T) {
+func TestStandbyBecomeParticipantBySync(t *testing.T) {
 	defer afterTest(t)
 
 	cl := testCluster{Size: 3}
@@ -400,6 +402,7 @@ func TestBecomeParticipantBySync(t *testing.T) {
 	lead, _ := cl.Leader()
 	cfg := conf.NewClusterConfig()
 	cfg.SyncInterval = 0
+	// turn off auto adjustment on cluster size
 	cfg.ActiveSize = -1
 	if err := cl.Participant(lead).setClusterConfig(cfg); err != nil {
 		t.Fatalf("setClusterConfig err = %v", err)
