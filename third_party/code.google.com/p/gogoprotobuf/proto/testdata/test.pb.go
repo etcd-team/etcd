@@ -36,7 +36,7 @@ It has these top-level messages:
 */
 package testdata
 
-import proto "github.com/coreos/etcd/third_party/github.com/coreos/etcd/third_party/code.google.com/p/gogoprotobuf/proto"
+import proto "github.com/coreos/etcd/third_party/code.google.com/p/gogoprotobuf/proto"
 import json "encoding/json"
 import math "math"
 
