@@ -113,6 +113,7 @@ func newParticipant(c *conf.Config, client *v2client, peerHub *peerHub, tickDura
 	}
 	p.rh = newRaftHandler(peerHub, p.Store.Version(), p.serverStats)
 	p.peerHub.setServerStats(p.serverStats)
+	p.peerHub.start()
 
 	snapDir := path.Join(p.cfg.DataDir, "snap")
 	if err := os.Mkdir(snapDir, 0700); err != nil {

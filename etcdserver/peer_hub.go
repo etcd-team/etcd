@@ -78,6 +78,12 @@ func (h *peerHub) getSeeds() map[string]bool {
 	return s
 }
 
+func (h *peerHub) start() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.stopped = false
+}
+
 func (h *peerHub) stop() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -85,6 +91,7 @@ func (h *peerHub) stop() {
 	for _, p := range h.peers {
 		p.stop()
 	}
+	h.peers = make(map[int64]*peer)
 	h.followersStats.Reset()
 	// http.Transport needs some time to put used connections
 	// into idle queues.

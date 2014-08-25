@@ -360,7 +360,7 @@ func TestBecomeStandbyByRemove(t *testing.T) {
 
 	lead, _ := cl.Leader()
 	config := conf.NewClusterConfig()
-	config.ActiveSize = 0
+	config.ActiveSize = -1
 	if err := cl.Participant(lead).setClusterConfig(config); err != nil {
 		t.Fatalf("setClusterConfig err = %v", err)
 	}
@@ -388,6 +388,43 @@ func TestBecomeStandbyByRemove(t *testing.T) {
 	if _, err := os.Stat(path.Join(cl.Node(rmIdx).Config.DataDir, "snap")); !os.IsNotExist(err) {
 		t.Errorf("snapDirStat = %v, want %v", err, os.ErrNotExist)
 	}
+}
+
+func TestBecomeParticipantBySync(t *testing.T) {
+	defer afterTest(t)
+
+	cl := testCluster{Size: 3}
+	cl.Start()
+	defer cl.Destroy()
+
+	lead, _ := cl.Leader()
+	cfg := conf.NewClusterConfig()
+	cfg.SyncInterval = 0
+	cfg.ActiveSize = -1
+	if err := cl.Participant(lead).setClusterConfig(cfg); err != nil {
+		t.Fatalf("setClusterConfig err = %v", err)
+	}
+
+	rmIdx := 1
+	if err := cl.Participant(lead).remove(cl.Id(rmIdx)); err != nil {
+		t.Fatalf("remove err = %v", err)
+	}
+	cl.Node(rmIdx).WaitMode(standbyMode)
+
+	cfg.ActiveSize = 5
+	if err := cl.Participant(lead).setClusterConfig(cfg); err != nil {
+		t.Fatalf("setClusterConfig err = %v", err)
+	}
+	// first-round sync duration
+	time.Sleep(time.Millisecond * 100)
+	cl.Node(rmIdx).WaitMode(participantMode)
+
+	wp := v2machineKVPrefix + fmt.Sprintf("/%d", cl.Id(rmIdx))
+	w, err := cl.Participant(lead).Watch(wp, false, false, 1)
+	if err != nil {
+		panic(err)
+	}
+	<-w.EventChan
 }
 
 type testCluster struct {
