@@ -34,6 +34,10 @@ import (
 	"github.com/coreos/etcd/store"
 )
 
+const (
+	testSnapCount = 100
+)
+
 func TestMultipleNodes(t *testing.T) {
 	defer afterTest(t)
 	tests := []int{1, 3, 5, 9, 11}
@@ -224,14 +228,12 @@ func TestTakingSnapshot(t *testing.T) {
 	cl := testCluster{Size: 1}
 	cl.Start()
 	defer cl.Destroy()
-
-	// TODO(xiangli): tunable compact; reduce testing time
-	for i := 0; i < defaultCompact; i++ {
+	for i := 0; i < testSnapCount; i++ {
 		cl.Participant(0).Set("/foo", false, "bar", store.Permanent)
 	}
 	snap := cl.Participant(0).node.GetSnap()
-	if snap.Index != int64(defaultCompact) {
-		t.Errorf("snap.Index = %d, want %d", snap.Index, defaultCompact)
+	if snap.Index != int64(testSnapCount) {
+		t.Errorf("snap.Index = %d, want %d", snap.Index, testSnapCount)
 	}
 }
 
@@ -243,7 +245,7 @@ func TestRestoreSnapshotFromLeader(t *testing.T) {
 	defer cl.Destroy()
 
 	// let leader do snapshot
-	for i := 0; i < defaultCompact; i++ {
+	for i := 0; i < testSnapCount; i++ {
 		cl.Participant(0).Set(fmt.Sprint("/foo", i), false, fmt.Sprint("bar", i), store.Permanent)
 	}
 
@@ -260,7 +262,7 @@ func TestRestoreSnapshotFromLeader(t *testing.T) {
 	}
 
 	// check store is recovered
-	for i := 0; i < defaultCompact; i++ {
+	for i := 0; i < testSnapCount; i++ {
 		ev, err := ts.Participant().Store.Get(fmt.Sprint("/foo", i), false, false)
 		if err != nil {
 			t.Errorf("get err = %v", err)
@@ -273,7 +275,7 @@ func TestRestoreSnapshotFromLeader(t *testing.T) {
 	}
 
 	// check new proposal could be committed in the new machine
-	wch, err := ts.Participant().Watch("/foo", false, false, uint64(defaultCompact))
+	wch, err := ts.Participant().Watch("/foo", false, false, uint64(testSnapCount))
 	if err != nil {
 		t.Errorf("watch err = %v", err)
 	}
@@ -295,16 +297,15 @@ func TestSaveSnapshot(t *testing.T) {
 	defer cl.Destroy()
 
 	n := cl.Node(0)
-	// TODO(xiangli): tunable compact; reduce testing time
-	for i := 0; i < defaultCompact; i++ {
+	for i := 0; i < testSnapCount; i++ {
 		n.Participant().Set("/foo", false, "bar", store.Permanent)
 	}
-	snapname := fmt.Sprintf("%016x-%016x-%016x.snap", n.Participant().clusterId, 1, defaultCompact)
+	snapname := fmt.Sprintf("%016x-%016x-%016x.snap", n.Participant().clusterId, 1, testSnapCount)
 	snappath := path.Join(n.Config.DataDir, "snap", snapname)
 	if _, err := os.Stat(snappath); err != nil {
 		t.Errorf("err = %v, want nil", err)
 	}
-	walname := fmt.Sprintf("%016x-%016x.wal", 1, defaultCompact)
+	walname := fmt.Sprintf("%016x-%016x.wal", 1, testSnapCount)
 	walpath := path.Join(n.Config.DataDir, "wal", walname)
 	if _, err := os.Stat(walpath); err != nil {
 		t.Errorf("err = %v, want nil", err)
@@ -316,18 +317,13 @@ func TestRestoreSnapshotFromDisk(t *testing.T) {
 
 	tests := []int{1, 3, 5}
 
-	// TODO(xiangli): tunable compact; reduce testing time
-	oldDefaultCompact := defaultCompact
-	defaultCompact = 10
-	defer func() { defaultCompact = oldDefaultCompact }()
-
 	for _, tt := range tests {
 		cl := testCluster{Size: tt}
 		cl.Start()
 		defer cl.Destroy()
 
 		lead, _ := cl.Leader()
-		for i := 0; i < defaultCompact+10; i++ {
+		for i := 0; i < testSnapCount+10; i++ {
 			cl.Participant(lead).Set(fmt.Sprint("/foo", i), false, fmt.Sprint("bar", i), store.Permanent)
 		}
 
@@ -336,7 +332,7 @@ func TestRestoreSnapshotFromDisk(t *testing.T) {
 
 		lead, _ = cl.Leader()
 		// check store is recovered
-		for i := 0; i < defaultCompact+10; i++ {
+		for i := 0; i < testSnapCount+10; i++ {
 			ev, err := cl.Participant(lead).Store.Get(fmt.Sprint("/foo", i), false, false)
 			if err != nil {
 				t.Errorf("get err = %v", err)
@@ -365,7 +361,6 @@ func (c *testCluster) Start() {
 	if c.Size <= 0 {
 		panic("cluster size <= 0")
 	}
-
 	nodes := make([]*testServer, c.Size)
 	c.nodes = nodes
 	cfg := newTestConfig()
@@ -639,6 +634,7 @@ func newTestConfig() *conf.Config {
 	c.Peer.HeartbeatInterval = 5
 	c.Peer.ElectionTimeout = 25
 	c.RetryInterval = 1 / 10.0
+	c.SnapshotCount = testSnapCount
 	dataDir, err := ioutil.TempDir(os.TempDir(), "etcd")
 	if err != nil {
 		panic(err)
