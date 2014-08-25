@@ -51,7 +51,6 @@ func TestConfigEnv(t *testing.T) {
 	assert.Equal(t, c.BindAddr, "127.0.0.1:4003", "")
 	assert.Equal(t, c.Peers, []string{"coreos.com:4001", "coreos.com:4002"}, "")
 	assert.Equal(t, c.PeersFile, "/tmp/peers", "")
-	assert.Equal(t, c.MaxResultBuffer, 512, "")
 	assert.Equal(t, c.MaxRetryAttempts, 5, "")
 	assert.Equal(t, c.Name, "test-name", "")
 	assert.Equal(t, c.Snapshot, true, "")
@@ -270,21 +269,6 @@ func TestConfigPeersFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peers-file", "/tmp/peers"}), "")
 	assert.Equal(t, c.PeersFile, "/tmp/peers", "")
-}
-
-// Ensures that the Max Result Buffer can be parsed from the environment.
-func TestConfigMaxResultBufferEnv(t *testing.T) {
-	withEnv("ETCD_MAX_RESULT_BUFFER", "512", func(c *Config) {
-		assert.Nil(t, c.LoadEnv(), "")
-		assert.Equal(t, c.MaxResultBuffer, 512, "")
-	})
-}
-
-// Ensures that the Max Result Buffer flag can be parsed.
-func TestConfigMaxResultBufferFlag(t *testing.T) {
-	c := New()
-	assert.Nil(t, c.LoadFlags([]string{"-max-result-buffer", "512"}), "")
-	assert.Equal(t, c.MaxResultBuffer, 512, "")
 }
 
 // Ensures that the Max Retry Attempts can be parsed from the environment.

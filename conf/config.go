@@ -37,7 +37,6 @@ type Config struct {
 	HTTPWriteTimeout float64  `env:"ETCD_HTTP_WRITE_TIMEOUT"`
 	Peers            []string `env:"ETCD_PEERS"`
 	PeersFile        string   `env:"ETCD_PEERS_FILE"`
-	MaxResultBuffer  int      `env:"ETCD_MAX_RESULT_BUFFER"`
 	MaxRetryAttempts int      `env:"ETCD_MAX_RETRY_ATTEMPTS"`
 	RetryInterval    float64  `env:"ETCD_RETRY_INTERVAL"`
 	Name             string   `env:"ETCD_NAME"`
@@ -72,7 +71,6 @@ func New() *Config {
 	c.Addr = "127.0.0.1:4001"
 	c.HTTPReadTimeout = DefaultReadTimeout
 	c.HTTPWriteTimeout = DefaultWriteTimeout
-	c.MaxResultBuffer = 1024
 	c.MaxRetryAttempts = 3
 	c.RetryInterval = 10.0
 	c.Snapshot = true
@@ -207,7 +205,6 @@ func (c *Config) LoadFlags(arguments []string) error {
 	f.Float64Var(&c.HTTPWriteTimeout, "http-write-timeout", c.HTTPReadTimeout, "")
 
 	f.StringVar(&c.DataDir, "data-dir", c.DataDir, "")
-	f.IntVar(&c.MaxResultBuffer, "max-result-buffer", c.MaxResultBuffer, "")
 	f.IntVar(&c.MaxRetryAttempts, "max-retry-attempts", c.MaxRetryAttempts, "")
 	f.Float64Var(&c.RetryInterval, "retry-interval", c.RetryInterval, "")
 	f.IntVar(&c.Peer.HeartbeatInterval, "peer-heartbeat-interval", c.Peer.HeartbeatInterval, "")
