@@ -61,7 +61,7 @@ func (p *participant) serveMachines(w http.ResponseWriter, r *http.Request) erro
 		}
 		ns[i] = m["etcd"][0]
 	}
-	w.Write([]byte(strings.Join(ns, ",")))
+	w.Write([]byte(strings.Join(ns, ", ")))
 	return nil
 }
 
