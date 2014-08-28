@@ -21,22 +21,24 @@ import (
 	"io"
 	"reflect"
 	"testing"
+
+	pb "github.com/coreos/etcd/wal/walpb"
 )
 
 func TestReadRecord(t *testing.T) {
 	tests := []struct {
 		data []byte
-		wr   *Record
+		wr   *pb.Record
 		we   error
 	}{
-		{infoRecord, &Record{Type: 1, Crc: 0, Data: infoData}, nil},
-		{[]byte(""), &Record{}, io.EOF},
-		{infoRecord[:len(infoRecord)-len(infoData)-8], &Record{}, io.ErrUnexpectedEOF},
-		{infoRecord[:len(infoRecord)-len(infoData)], &Record{}, io.ErrUnexpectedEOF},
-		{infoRecord[:len(infoRecord)-8], &Record{}, io.ErrUnexpectedEOF},
+		{infoRecord, &pb.Record{Type: 1, Crc: 0, Data: infoData}, nil},
+		{[]byte(""), &pb.Record{}, io.EOF},
+		{infoRecord[:len(infoRecord)-len(infoData)-8], &pb.Record{}, io.ErrUnexpectedEOF},
+		{infoRecord[:len(infoRecord)-len(infoData)], &pb.Record{}, io.ErrUnexpectedEOF},
+		{infoRecord[:len(infoRecord)-8], &pb.Record{}, io.ErrUnexpectedEOF},
 	}
 
-	rec := &Record{}
+	rec := &pb.Record{}
 	for i, tt := range tests {
 		buf := bytes.NewBuffer(tt.data)
 		e := readRecord(buf, rec)
@@ -46,16 +48,16 @@ func TestReadRecord(t *testing.T) {
 		if !reflect.DeepEqual(e, tt.we) {
 			t.Errorf("#%d: err = %v, want %v", i, e, tt.we)
 		}
-		rec = &Record{}
+		rec = &pb.Record{}
 	}
 }
 
 func TestWriteRecord(t *testing.T) {
-	b := &Record{}
+	b := &pb.Record{}
 	typ := int64(0xABCD)
 	d := []byte("Hello world!")
 	buf := new(bytes.Buffer)
-	writeRecord(buf, &Record{Type: typ, Crc: 0, Data: d})
+	writeRecord(buf, &pb.Record{Type: typ, Crc: 0, Data: d})
 	err := readRecord(buf, b)
 	if err != nil {
 		t.Errorf("err = %v, want nil", err)

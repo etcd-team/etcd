@@ -19,9 +19,11 @@ package wal
 import (
 	"encoding/binary"
 	"io"
+
+	pb "github.com/coreos/etcd/wal/walpb"
 )
 
-func writeRecord(w io.Writer, rec *Record) error {
+func writeRecord(w io.Writer, rec *pb.Record) error {
 	data, err := rec.Marshal()
 	if err != nil {
 		return err
@@ -34,7 +36,7 @@ func writeRecord(w io.Writer, rec *Record) error {
 	return err
 }
 
-func readRecord(r io.Reader, rec *Record) error {
+func readRecord(r io.Reader, rec *pb.Record) error {
 	rec.Reset()
 	l, err := readInt64(r)
 	if err != nil {

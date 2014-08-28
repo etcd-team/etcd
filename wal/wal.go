@@ -27,6 +27,7 @@ import (
 	"sort"
 
 	"github.com/coreos/etcd/raft"
+	pb "github.com/coreos/etcd/wal/walpb"
 )
 
 const (
@@ -137,7 +138,7 @@ func (w *WAL) SaveInfo(i *raft.Info) error {
 	if err != nil {
 		panic(err)
 	}
-	rec := &Record{Type: infoType, Data: b}
+	rec := &pb.Record{Type: infoType, Data: b}
 	return writeRecord(w.bw, rec)
 }
 
@@ -146,7 +147,7 @@ func (w *WAL) SaveEntry(e *raft.Entry) error {
 	if err != nil {
 		panic(err)
 	}
-	rec := &Record{Type: entryType, Data: b}
+	rec := &pb.Record{Type: entryType, Data: b}
 	return writeRecord(w.bw, rec)
 }
 
@@ -156,7 +157,7 @@ func (w *WAL) SaveState(s *raft.State) error {
 	if err != nil {
 		panic(err)
 	}
-	rec := &Record{Type: stateType, Data: b}
+	rec := &pb.Record{Type: stateType, Data: b}
 	return writeRecord(w.bw, rec)
 }
 
@@ -191,7 +192,7 @@ func (n *Node) load(path string) error {
 	}
 	defer f.Close()
 	br := bufio.NewReader(f)
-	rec := &Record{}
+	rec := &pb.Record{}
 
 	err = readRecord(br, rec)
 	if err != nil {

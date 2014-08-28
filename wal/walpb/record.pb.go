@@ -3,7 +3,7 @@
 // DO NOT EDIT!
 
 /*
-	Package wal is a generated protocol buffer package.
+	Package walpb is a generated protocol buffer package.
 
 	It is generated from these files:
 		record.proto
@@ -11,25 +11,24 @@
 	It has these top-level messages:
 		Record
 */
-package wal
+package walpb
 
 import proto "code.google.com/p/gogoprotobuf/proto"
-import json "encoding/json"
 import math "math"
 
 // discarding unused import gogoproto "code.google.com/p/gogoprotobuf/gogoproto/gogo.pb"
 
 import io "io"
+import fmt "fmt"
 import code_google_com_p_gogoprotobuf_proto "code.google.com/p/gogoprotobuf/proto"
 
-// Reference proto, json, and math imports to suppress error if they are not otherwise used.
+// Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = &json.SyntaxError{}
 var _ = math.Inf
 
 type Record struct {
 	Type             int64  `protobuf:"varint,1,req,name=type" json:"type"`
-	Crc              int32  `protobuf:"varint,2,req,name=crc" json:"crc"`
+	Crc              uint32 `protobuf:"varint,2,req,name=crc" json:"crc"`
 	Data             []byte `protobuf:"bytes,3,opt,name=data" json:"data,omitempty"`
 	XXX_unrecognized []byte `json:"-"`
 }
@@ -61,7 +60,7 @@ func (m *Record) Unmarshal(data []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return code_google_com_p_gogoprotobuf_proto.ErrWrongType
+				return fmt.Errorf("proto: wrong wireType = %d for field Type", wireType)
 			}
 			for shift := uint(0); ; shift += 7 {
 				if index >= l {
@@ -76,7 +75,7 @@ func (m *Record) Unmarshal(data []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return code_google_com_p_gogoprotobuf_proto.ErrWrongType
+				return fmt.Errorf("proto: wrong wireType = %d for field Crc", wireType)
 			}
 			for shift := uint(0); ; shift += 7 {
 				if index >= l {
@@ -84,14 +83,14 @@ func (m *Record) Unmarshal(data []byte) error {
 				}
 				b := data[index]
 				index++
-				m.Crc |= (int32(b) & 0x7F) << shift
+				m.Crc |= (uint32(b) & 0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
 		case 3:
 			if wireType != 2 {
-				return code_google_com_p_gogoprotobuf_proto.ErrWrongType
+				return fmt.Errorf("proto: wrong wireType = %d for field Data", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -138,7 +137,7 @@ func (m *Record) Size() (n int) {
 	var l int
 	_ = l
 	n += 1 + sovRecord(uint64(m.Type))
-	n += 1 + sovRecord(uint64(uint32(m.Crc)))
+	n += 1 + sovRecord(uint64(m.Crc))
 	if m.Data != nil {
 		l = len(m.Data)
 		n += 1 + l + sovRecord(uint64(l))
@@ -182,7 +181,7 @@ func (m *Record) MarshalTo(data []byte) (n int, err error) {
 	i = encodeVarintRecord(data, i, uint64(m.Type))
 	data[i] = 0x10
 	i++
-	i = encodeVarintRecord(data, i, uint64(uint32(m.Crc)))
+	i = encodeVarintRecord(data, i, uint64(m.Crc))
 	if m.Data != nil {
 		data[i] = 0x1a
 		i++
