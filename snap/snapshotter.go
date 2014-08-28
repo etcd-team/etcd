@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/coreos/etcd/raft"
+	pb "github.com/coreos/etcd/snap/snappb"
 )
 
 const (
@@ -43,7 +44,7 @@ func (s *Snapshotter) Save(snapshot *raft.Snapshot) error {
 		panic(err)
 	}
 	crc := crc32.Update(0, crcTable, b)
-	snap := Snapshot{Crc: crc, Data: b}
+	snap := pb.Snapshot{Crc: crc, Data: b}
 	d, err := snap.Marshal()
 	if err != nil {
 		return err
@@ -82,7 +83,7 @@ func loadSnap(dir, name string) (*raft.Snapshot, error) {
 		return nil, err
 	}
 
-	var serializedSnap Snapshot
+	var serializedSnap pb.Snapshot
 	if err = serializedSnap.Unmarshal(b); err != nil {
 		log.Printf("Corrupted snapshot file %v: %v", name, err)
 		return nil, err
