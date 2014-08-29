@@ -1,3 +1,20 @@
+v0.5rc1
+* Rewrite the code for raft protocol, stable storage, transporter, standby and http serving
+* Have dependency on go-etcd and gogoprobuf only
+* Refine and document cluster finding process
+* Refactor mode switch mechanism
+* Change the layout and file format of data directory
+* Introduce unique id for each node
+* Introduce unique id for each cluster
+* Stop to support deprecated flags and v1 API
+* Use protobuf for intercommunication and data access
+* Refine logging (?)
+* Performance degrade(measurement needed)
+* Don't remove old log data anymore(discuss?)
+* Use go1.3 instead of go1.2 (discuss?)
+* Deprecate config file (discuss?)
+* Welcome new tools: etcd4j, etcd-browser, etc-clojure, etcdcpp
+
 v0.4.6
 * Fix long-term timer leak (#900, #875, #868, #904)
 * Fix `Running` field in standby_info file (#881)
