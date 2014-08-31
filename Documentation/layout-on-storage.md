@@ -1,4 +1,4 @@
-## Layout on Stable Storage
+## Layout of Data Directory
 
 The document describes the layout of files in data directory on stable storage.
 
@@ -20,7 +20,7 @@ The following two are the term and committed index when the snapshot is generate
 
 ### Append-Only Writes and No File Deletion
 
-Etcd only appends data to files instead of overwriting.
+etcd only appends data to files instead of overwriting.
 
 It never deletes any files in the directory.
 
