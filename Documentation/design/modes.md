@@ -1,24 +1,24 @@
 ## Modes
 
-Etcd can run in either participant mode or standby mode.
+Etcd runs in either participant mode or standby mode.
 
 ### Participant Mode
 
-In this mode, the node enrolls in raft consensus protocol. It maintains a copy of the log in its disk.
+In this mode, etcd machine enrolls in raft consensus protocol. It keeps maintaining a copy of the log in its disk.
 
 ### Standby Mode
 
-Standby-mode node proxies all requests to participant-mode nodes, and joins cluster if needed.
+Standby-mode machines proxy all requests to participant-mode machines and join the cluster if there is space for more participants.
 
 ### Participant Mode -> Standby Mode
 
-When the node is removed from raft consensus protocol, it comes into standby mode.
+When the machine is removed from raft consensus protocol, it comes into standby mode.
 
-Node id, log data and snapshot is discarded because they belongs to a removed node and should not be reused.
+NodeId, log data and snapshot is discarded because they belongs to a removed machine and should not be reused.
 
 ### Standby Mode -> Participant Mode
 
-When the node finds there is some vacancy in the cluster, it tries to join the cluster as a new participant.
+When the machine finds there is some vacancy in the cluster, it tries to join the cluster as a new participant.
 
 ### Participant Mode -> Stopped
 
