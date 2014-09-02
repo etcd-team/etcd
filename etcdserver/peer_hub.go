@@ -50,7 +50,6 @@ type peerHub struct {
 
 func newPeerHub(c *http.Client, followersStats *raftFollowersStats) *peerHub {
 	h := &peerHub{
-		peers:          make(map[int64]*peer),
 		seeds:          make(map[string]bool),
 		c:              c,
 		followersStats: followersStats,
@@ -76,6 +75,13 @@ func (h *peerHub) getSeeds() map[string]bool {
 		s[k] = v
 	}
 	return s
+}
+
+func (h *peerHub) start() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.stopped = false
+	h.peers = make(map[int64]*peer)
 }
 
 func (h *peerHub) stop() {

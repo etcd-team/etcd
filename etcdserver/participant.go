@@ -113,6 +113,7 @@ func newParticipant(c *conf.Config, client *v2client, peerHub *peerHub, tickDura
 	}
 	p.rh = newRaftHandler(peerHub, p.Store.Version(), p.serverStats)
 	p.peerHub.setServerStats(p.serverStats)
+	p.peerHub.start()
 
 	snapDir := path.Join(p.cfg.DataDir, "snap")
 	if err := os.Mkdir(snapDir, 0700); err != nil {
@@ -284,6 +285,18 @@ func (p *participant) run(stop chan struct{}) error {
 		}
 		p.send(node.Msgs())
 		if node.IsRemoved() {
+			snapDir := path.Join(p.cfg.DataDir, "snap")
+			newSnapDir := path.Join(p.cfg.DataDir, fmt.Sprintf("snap.%x", p.id))
+			if err := os.Rename(snapDir, newSnapDir); err != nil {
+				log.Printf("id=%x participant.removed.snap err=%q", p.id, err)
+				return err
+			}
+			walDir := path.Join(p.cfg.DataDir, "wal")
+			newWalDir := path.Join(p.cfg.DataDir, fmt.Sprintf("wal.%x", p.id))
+			if err := os.Rename(walDir, newWalDir); err != nil {
+				log.Printf("id=%x participant.removed.wal err=%q", p.id, err)
+				return err
+			}
 			log.Printf("id=%x participant.end\n", p.id)
 			return nil
 		}
