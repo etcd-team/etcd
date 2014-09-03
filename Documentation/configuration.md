@@ -43,7 +43,7 @@ The full documentation is contained in the [API docs](https://github.com/coreos/
 * `-config` - The path of the etcd configuration file. Defaults to `/etc/etcd/etcd.conf`.
 * `-cors` - A comma separated white list of origins for cross-origin resource sharing.
 * `-cpuprofile` - The path to a file to output CPU profile data. Enables CPU profiling when present.
-* `-data-dir` - The directory to store log and snapshot. Defaults to the current working directory.
+* [`-data-dir`](https://github.com/coreos/etcd/blob/master/Documentation/data-directory.md)- The directory to store log and snapshot. Defaults to the current working directory.
 * `-max-result-buffer` - The max size of result buffer. Defaults to `1024`.
 * `-max-retry-attempts` - The max retry attempts when trying to join a cluster. Defaults to `3`.
 * `-peer-addr` - The advertised public hostname:port for server communication. Defaults to `127.0.0.1:7001`.
